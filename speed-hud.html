@@ -284,6 +284,8 @@ function stepAuto(dt, now) {
 /* ============ 速度来源 3：GPX 轨迹回放 ============ */
 
 const gpx = { pts: null, t: 0, playing: false, rate: 1, name: '', duration: 0 };
+const GPS_GOOD_ACC = 20;    // 定位误差 ≤ 20 m：可以用位置差估算速度、累计距离
+const GPS_POOR_ACC = 50;    // 定位误差 > 50 m：连手机给的速度也不采用
 const GPX_WINDOW = 5; // 速度平滑窗口（秒）：用前后各 2.5 秒内的总距离 / 总时间
 
 function parseGPX(text) {
@@ -300,7 +302,13 @@ function parseGPX(text) {
     if (!te || isNaN(lat) || isNaN(lon)) continue;
     const t = Date.parse(te.textContent.trim());
     if (isNaN(t)) continue;
-    pts.push({ lat, lon, t });
+    // 本程序录的文件带有定位误差（xrsnow:acc）和手机测得的速度（gpxtpx:speed，m/s）
+    const accEl = n.getElementsByTagNameNS('*', 'acc')[0];
+    const spdEl = n.getElementsByTagNameNS('*', 'speed')[0];
+    const acc = accEl ? parseFloat(accEl.textContent) : null;
+    if (acc !== null && acc > GPS_POOR_ACC) continue; // 误差太大的点不参与回放
+    const dev = spdEl ? parseFloat(spdEl.textContent) * 3.6 : null;
+    pts.push({ lat, lon, t, dev: dev !== null && !isNaN(dev) && dev >= 0 ? dev : null });
   }
   // 按时间排序并去掉时间重复的点
   pts.sort((a, b) => a.t - b.t);
@@ -327,7 +335,8 @@ function parseGPX(text) {
     const dt = pts[k].s - pts[j].s;
     let v = dt > 0 ? (pts[k].d - pts[j].d) / dt * 3.6 : 0;
     if (v > 200) v = 0; // 明显的定位跳点
-    pts[i].v = v;
+    // 有手机实测速度时优先用它（多普勒测速，比位置差估算准）
+    pts[i].v = pts[i].dev !== null ? pts[i].dev : v;
   }
   return pts;
 }
@@ -394,8 +403,9 @@ addEventListener('drop', (e) => {
 
 /* ============ 速度来源 4：GPS（Geolocation API） ============ */
 
-const gps = { watchId: null, v: null, last: null, lastFix: 0, acc: null, err: '' };
-const GPS_STALE_MS = 5000; // 超过 5 秒没有新定位视为信号丢失
+const gps = { watchId: null, v: null, src: '', anchor: null, speedAt: 0, lastFix: 0, acc: null, err: '' };
+const GPS_STALE_MS = 5000;  // 超过 5 秒没有新定位视为信号丢失
+const GPS_SPEED_MS = 3000;  // 超过 3 秒没有可信的速度就显示 --
 
 function startGPS() {
   if (gps.watchId !== null) return;
@@ -424,20 +434,34 @@ function updateStartBtn() {
 
 function onGPS(pos) {
   const c = pos.coords;
+  const now = performance.now();
+  const hasDevSpeed = c.speed !== null && c.speed !== undefined && !isNaN(c.speed) && c.speed >= 0;
   let v = null;
-  if (c.speed !== null && c.speed !== undefined && !isNaN(c.speed) && c.speed >= 0) {
+  if (hasDevSpeed && c.accuracy <= GPS_POOR_ACC) {
     // 设备直接给出的速度（m/s），iPhone 上是基于多普勒的，比较准
     v = c.speed * 3.6;
-  } else if (gps.last) {
-    // 设备不给速度时，用相邻两次定位的距离 / 时间估算
-    const dt = (pos.timestamp - gps.last.t) / 1000;
-    if (dt >= 0.5) v = haversine(gps.last.lat, gps.last.lon, c.latitude, c.longitude) / dt * 3.6;
+    gps.src = 'device';
+  } else if (c.accuracy <= GPS_GOOD_ACC) {
+    // 设备不给速度时，用位置差估算；只在定位误差小的时候做，并且基线至少 2 秒，
+    // 否则（比如室内 Wi-Fi 定位）位置的误差会被当成移动，算出乱跳的速度
+    const a = gps.anchor;
+    if (!a) {
+      gps.anchor = { lat: c.latitude, lon: c.longitude, t: pos.timestamp };
+    } else {
+      const dt = (pos.timestamp - a.t) / 1000;
+      if (dt >= 2) {
+        v = haversine(a.lat, a.lon, c.latitude, c.longitude) / dt * 3.6;
+        gps.anchor = { lat: c.latitude, lon: c.longitude, t: pos.timestamp };
+        gps.src = 'calc';
+      }
+    }
+  } else {
+    gps.anchor = null; // 信号差：不估算速度，下次信号好时重新开始
   }
-  gps.last = { lat: c.latitude, lon: c.longitude, t: pos.timestamp };
-  gps.lastFix = performance.now();
+  gps.lastFix = now;
   gps.acc = c.accuracy;
   gps.err = '';
-  if (v !== null && v < 200) gps.v = v; // 丢弃明显异常的跳点
+  if (v !== null && v < 200) { gps.v = v; gps.speedAt = now; } // 丢弃明显异常的跳点
   if (rec.on) recordPoint(c, pos.timestamp);
 }
 
@@ -497,20 +521,24 @@ function saveRec() {
   } catch (e) { /* 存储满了也不影响内存里的记录，导出仍然可用 */ }
 }
 
+// 所有点都记录（包括信号差的点，方便事后诊断），每个点带上定位误差
 function recordPoint(c, t) {
-  if (c.accuracy > 50) return;               // 误差太大的点不记录
   const last = rec.pts[rec.pts.length - 1];
-  if (last) {
-    if (t - last.t < 900) return;            // 最多每秒 1 个点
-    rec.dist += haversine(last.lat, last.lon, c.latitude, c.longitude);
-  }
-  rec.pts.push({
+  if (last && t - last.t < 900) return;      // 最多每秒 1 个点
+  const p = {
     lat: +c.latitude.toFixed(7),
     lon: +c.longitude.toFixed(7),
     ele: c.altitude === null || c.altitude === undefined ? null : +c.altitude.toFixed(1),
     t,
-    v: c.speed !== null && c.speed >= 0 ? +c.speed.toFixed(2) : null // m/s
-  });
+    v: c.speed !== null && c.speed >= 0 ? +c.speed.toFixed(2) : null, // m/s，设备给不出时为 null
+    acc: Math.round(c.accuracy)                                         // 定位误差（米）
+  };
+  // 距离只用误差小的点累计，避免信号差时“原地跑出”几百米
+  if (p.acc <= GPS_GOOD_ACC) {
+    if (rec.lastGood) rec.dist += haversine(rec.lastGood.lat, rec.lastGood.lon, p.lat, p.lon);
+    rec.lastGood = p;
+  }
+  rec.pts.push(p);
   rec.exported = false;
   if (++rec.unsaved >= 10) saveRec();        // 每 10 个点保存一次
 }
@@ -519,7 +547,7 @@ function startRec() {
   if (rec.pts.length && !rec.exported &&
       !confirm(`上一段轨迹（${rec.pts.length} 点）还没导出，开始新记录会覆盖它。继续吗？`)) return;
   if (cfg.mode !== 'gps') setMode('gps');    // 记录需要真实 GPS
-  Object.assign(rec, { on: true, pts: [], dist: 0, start: Date.now(), exported: false });
+  Object.assign(rec, { on: true, pts: [], dist: 0, lastGood: null, start: Date.now(), exported: false });
   saveRec();
   resetMax(true);
   toast('● 开始记录轨迹');
@@ -539,13 +567,15 @@ function buildGPX() {
   const body = rec.pts.map((p) =>
     `      <trkpt lat="${p.lat}" lon="${p.lon}">` +
     (p.ele !== null ? `<ele>${p.ele}</ele>` : '') +
-    `<time>${iso(p.t)}</time>` +
-    (p.v !== null ? `<extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>${p.v}</gpxtpx:speed></gpxtpx:TrackPointExtension></extensions>` : '') +
-    `</trkpt>`).join('\n');
+    `<time>${iso(p.t)}</time><extensions>` +
+    (p.v !== null ? `<gpxtpx:TrackPointExtension><gpxtpx:speed>${p.v}</gpxtpx:speed></gpxtpx:TrackPointExtension>` : '') +
+    (p.acc !== undefined ? `<xrsnow:acc>${p.acc}</xrsnow:acc>` : '') +
+    `</extensions></trkpt>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="XR SNOW HUD"
   xmlns="http://www.topografix.com/GPX/1/1"
-  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2">
+  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
+  xmlns:xrsnow="https://williamnatsume.github.io/xr-snow/gpx/v1">
   <metadata><time>${iso(rec.start || rec.pts[0].t)}</time></metadata>
   <trk>
     <name>XR SNOW ${new Date(rec.start || rec.pts[0].t).toLocaleString()}</name>
@@ -663,7 +693,9 @@ function statusText() {
       if (gps.err && gps.lastFix === 0) return 'GPS：' + gps.err;
       if (gps.lastFix === 0) return 'GPS 等待定位…';
       if (performance.now() - gps.lastFix > GPS_STALE_MS) return 'GPS 信号丢失';
-      return `GPS ±${Math.round(gps.acc)}m` + (wakeState === 'on' ? ' · 常亮' : ' · 未常亮');
+      return `GPS ±${Math.round(gps.acc)}m` +
+        (performance.now() - gps.speedAt > GPS_SPEED_MS ? ' · 信号弱' : gps.src === 'calc' ? ' · 估算' : '') +
+        (wakeState === 'on' ? ' · 常亮' : ' · 未常亮');
   }
   return '';
 }
@@ -681,7 +713,9 @@ function frame(now) {
     // GPX 按真实时间推进：即使帧率掉了，回放时钟也不能变慢
     case 'gpx': src = stepGPX(Math.min(2, rawDt)); tau = 0.4; break;
     case 'gps':
-      src = gps.v; tau = 0.6;
+      // 信号差、拿不到可信速度时显示 --，宁可不显示也不显示错的
+      src = now - gps.speedAt <= GPS_SPEED_MS ? gps.v : null;
+      tau = 0.6;
       stale = gps.lastFix === 0 || now - gps.lastFix > GPS_STALE_MS;
       break;
   }
