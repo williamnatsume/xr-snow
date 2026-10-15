@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- iPhone：“添加到主屏幕”后以全屏网页 App 方式打开 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
+<title>XR SNOW 速度 HUD</title>
+<style>
+  /* 波导是透视的：纯黑 = 透明，所以整个页面背景必须是纯黑 */
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body {
+    color: #fff;
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+  }
+  body.hide-cursor, body.hide-cursor * { cursor: none !important; }
+
+  /* 640×400 的“画布”，按窗口大小等比缩放；在模组上全屏时正好 1:1 */
+  #stage {
+    position: absolute; left: 0; top: 0;
+    width: 640px; height: 400px;
+    transform-origin: 0 0;
+    overflow: hidden;
+    background: #000;
+  }
+  /* 打开设置时显示 640×400 的边框，方便判断内容在可视区域里的位置 */
+  #stage.guide { box-shadow: inset 0 0 0 1px #555; }
+  #stage.guide #crossH, #stage.guide #crossV { display: block; }
+  #crossH, #crossV { display: none; position: absolute; background: #333; pointer-events: none; }
+  #crossH { left: 0; right: 0; top: 200px; height: 1px; }
+  #crossV { top: 0; bottom: 0; left: 320px; width: 1px; }
+
+  /* HUD 内容组：以 (320+偏移X, 200+偏移Y) 为中心 */
+  #hud {
+    position: absolute; left: 320px; top: 200px;
+    transform: translate(-50%, -50%);
+    text-align: center; white-space: nowrap; line-height: 1;
+    pointer-events: none;
+  }
+  #speedRow { display: flex; align-items: baseline; justify-content: center; }
+  #speed {
+    display: inline-block; min-width: 2ch; text-align: right;
+    font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
+  }
+  #speed.stale { opacity: 0.35; }
+  #unit { font-weight: 600; margin-left: 0.25em; }
+  #subRow {
+    display: flex; justify-content: space-between; gap: 1.6em;
+    margin-top: 0.45em; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  #status { margin-top: 0.6em; opacity: 0.5; font-weight: 500; }
+  #rec { margin-top: 0.4em; color: #ff3b30; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* GPS 模式下“开启定位”按钮（iPhone 必须由用户点击才能弹出定位权限） */
+  #startGps {
+    display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 22px; line-height: 1.4; padding: 14px 26px;
+    background: #000; color: #33ff66; border: 2px solid #33ff66; border-radius: 14px;
+  }
+  #startGps small { font-size: 13px; color: #8c8; }
+
+  /* 底部提示（切换模式、清零等） */
+  #toast {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    font-size: 14px; color: #aaa; white-space: nowrap;
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  /* 设置面板（平时隐藏） */
+  #panel {
+    position: absolute; left: 10px; top: 10px; right: 10px; bottom: 10px;
+    box-sizing: border-box; padding: 8px 12px;
+    background: rgba(18, 18, 18, 0.9); border: 1px solid #555; border-radius: 8px;
+    font-size: 13px; color: #ddd; overflow-y: auto;
+    display: none; transition: opacity .25s;
+  }
+  #panel.open { display: block; }
+  /* 调整位置/字号时面板自动变淡，方便看到 HUD 本身 */
+  #panel.peek { opacity: 0.15; }
+  .row { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+  .row > label:first-child { width: 72px; flex: none; color: #999; }
+  .row input[type=range] { flex: 1; min-width: 0; }
+  .row output { width: 60px; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+  .title { justify-content: space-between; margin-bottom: 2px; }
+  .title b { color: #fff; font-size: 14px; }
+  #dispInfo { color: #777; font-size: 11px; }
+  button, select {
+    background: #2a2a2a; color: #ddd; border: 1px solid #555; border-radius: 4px;
+    font: inherit; padding: 2px 8px; cursor: pointer;
+  }
+  button.on { background: #e8e8e8; color: #000; border-color: #e8e8e8; }
+  button.rec { background: #c62828; color: #fff; border-color: #c62828; }
+  #recInfo { color: #888; font-size: 12px; }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  #gpxFile { flex: 1; min-width: 0; font-size: 12px; color: #aaa; }
+  .help { margin-top: 6px; color: #777; font-size: 11px; line-height: 1.5; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="crossH"></div><div id="crossV"></div>
+
+  <div id="hud">
+    <div id="speedRow"><span id="speed">0</span><span id="unit">km/h</span></div>
+    <div id="subRow"><span id="max">MAX 0</span><span id="clock">--:--</span></div>
+    <div id="status"></div>
+    <div id="rec" style="display:none"></div>
+  </div>
+
+  <button id="startGps">开启 GPS 定位<br><small>同时保持屏幕常亮</small></button>
+
+  <div id="toast"></div>
+
+  <div id="panel">
+    <div class="row title"><b>XR SNOW HUD 设置</b><span id="dispInfo"></span></div>
+
+    <div class="row"><label>速度来源</label>
+      <div class="btns" id="modeBtns">
+        <button data-mode="manual">1 手动</button>
+        <button data-mode="auto">2 自动</button>
+        <button data-mode="gpx">3 GPX 回放</button>
+        <button data-mode="gps">4 GPS</button>
+      </div>
+    </div>
+
+    <div class="row" id="gpxRow"><label>GPX 文件</label>
+      <input type="file" id="gpxFile">
+      <select id="rate">
+        <option value="1">1×</option><option value="2">2×</option><option value="4">4×</option>
+        <option value="8">8×</option><option value="16">16×</option>
+      </select>
+      <button id="playBtn">播放/暂停</button>
+    </div>
+
+    <div class="row"><label>轨迹记录</label>
+      <div class="btns"><button id="recBtn">● 开始记录 (L)</button><button id="exportBtn">导出 GPX (E)</button></div>
+      <span id="recInfo"></span>
+    </div>
+
+    <div class="row"><label>文字大小</label><input type="range" data-k="size" min="60" max="300" step="2"><output data-o="size"></output></div>
+    <div class="row"><label>左右偏移</label><input type="range" data-k="offX" min="-300" max="300" step="1"><output data-o="offX"></output></div>
+    <div class="row"><label>上下偏移</label><input type="range" data-k="offY" min="-190" max="190" step="1"><output data-o="offY"></output></div>
+    <div class="row"><label>文字颜色</label>
+      <div class="btns" id="colorBtns">
+        <button data-color="white"><span class="swatch" style="background:#fff"></span>白</button>
+        <button data-color="green"><span class="swatch" style="background:#3f6"></span>绿</button>
+        <button data-color="yellow"><span class="swatch" style="background:#ffd400"></span>黄</button>
+      </div>
+    </div>
+    <div class="row"><label>亮度</label><input type="range" data-k="bright" min="10" max="100" step="5"><output data-o="bright"></output></div>
+    <div class="row"><label>超速阈值</label><input type="range" data-k="threshold" min="10" max="120" step="1"><output data-o="threshold"></output></div>
+    <div class="row"><label>状态行</label><label><input type="checkbox" id="showStatus"> 显示模式 / GPS 状态小字</label></div>
+
+    <div class="row btns" style="margin-top:4px">
+      <button id="fsBtn">全屏 (F)</button>
+      <button id="resetMaxBtn">清零最高速 (R)</button>
+      <button id="centerBtn">位置居中</button>
+      <button id="defaultsBtn">恢复默认</button>
+      <button id="closeBtn">关闭 (S)</button>
+    </div>
+
+    <div class="help">
+      面板打开时：方向键移动画面（Shift = 10px），+ / − 调字号，S 或 Esc 关闭。<br>
+      手动模式：↑↓ 加减速（Shift = 5）。GPX：空格 播放/暂停，←→ 快进/后退 10 秒，[ ] 调回放倍速。<br>
+      轨迹记录（GPS 模式）：L 开始/停止，E 导出 GPX；记录会自动保存在本地，页面意外关闭也不丢。<br>
+      超过阈值变橙色，超过阈值 +10 变红色。设置自动保存在本浏览器。
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ============ 常量与设置 ============ */
+
+const W = 640, H = 400;                 // 设计分辨率（模组原生分辨率）
+const STORE_KEY = 'xrsnow.speedhud.v1'; // localStorage 键名
+
+const DEFAULTS = {
+  size: 150,        // 速度数字字号（px，按 640×400 计）
+  offX: 0,          // 内容组水平偏移
+  offY: 0,          // 内容组垂直偏移
+  color: 'white',   // white / green / yellow
+  bright: 100,      // 亮度 %
+  threshold: 50,    // 超速阈值 km/h
+  showStatus: true, // 是否显示状态小字
+  mode: 'auto'      // manual / auto / gpx / gps
+};
+
+const COLORS = { white: '#ffffff', green: '#33ff66', yellow: '#ffd400' };
+const WARN_ORANGE = '#ff8a00';
+const WARN_RED = '#ff2a1a';
+const MODE_NAMES = { manual: '手动模拟', auto: '自动模拟', gpx: 'GPX 回放', gps: 'GPS' };
+
+// 读取本地保存的设置（隐私模式下 localStorage 可能不可用，所以用 try）
+function loadCfg() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+    return Object.assign({}, DEFAULTS, saved);
+  } catch (e) {
+    return Object.assign({}, DEFAULTS);
+  }
+}
+function saveCfg() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch (e) { /* 忽略 */ }
+}
+let cfg = loadCfg();
+
+/* ============ 工具函数 ============ */
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// 两点间球面距离（米）
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// 秒数 → mm:ss
+function fmtDur(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return (h ? h + ':' + pad2(m) : m) + ':' + pad2(s % 60);
+}
+
+let toastTimer = 0;
+function toast(msg, ms = 2200) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ============ 画布缩放：把 640×400 等比放进当前窗口 ============ */
+
+const stage = $('stage');
+function fitStage() {
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  const x = (innerWidth - W * s) / 2, y = (innerHeight - H * s) / 2;
+  stage.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+  $('dispInfo').textContent =
+    `窗口 ${innerWidth}×${innerHeight} · 缩放 ${s.toFixed(2)}× · DPR ${+devicePixelRatio.toFixed(2)}`;
+}
+addEventListener('resize', fitStage);
+
+/* ============ 速度来源 1：手动模拟 ============ */
+
+const manual = { v: 0 };
+
+/* ============ 速度来源 2：自动模拟（0–60 平滑变化） ============ */
+
+const auto = { v: 0, a: 0, target: 30, nextChange: 0 };
+function stepAuto(dt, now) {
+  // 每隔几秒换一个目标速度：模拟直线加速、转弯减速，偶尔停下
+  if (now >= auto.nextChange) {
+    const r = Math.random();
+    auto.target = r < 0.12 ? 0 : 15 + Math.random() * 45;
+    auto.nextChange = now + (auto.target === 0 ? 4000 + Math.random() * 4000
+                                               : 3000 + Math.random() * 6000);
+  }
+  // 期望加速度：与差值成正比，并限制最大加/减速度（km/h 每秒）
+  const diff = auto.target - auto.v;
+  const want = clamp(diff * 0.8, -8, 5);
+  // 加速度本身也做平滑，避免速度曲线出现“折角”
+  auto.a += (want - auto.a) * (1 - Math.exp(-dt / 0.8));
+  auto.v = clamp(auto.v + auto.a * dt, 0, 60);
+  if (auto.v === 0 && auto.a < 0) auto.a = 0;
+  return auto.v;
+}
+
+/* ============ 速度来源 3：GPX 轨迹回放 ============ */
+
+const gpx = { pts: null, t: 0, playing: false, rate: 1, name: '', duration: 0 };
+const GPX_WINDOW = 5; // 速度平滑窗口（秒）：用前后各 2.5 秒内的总距离 / 总时间
+
+function parseGPX(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('XML 解析失败');
+  let nodes = doc.getElementsByTagName('trkpt');
+  if (!nodes.length) nodes = doc.getElementsByTagName('rtept');
+
+  let pts = [];
+  for (const n of nodes) {
+    const lat = parseFloat(n.getAttribute('lat'));
+    const lon = parseFloat(n.getAttribute('lon'));
+    const te = n.getElementsByTagName('time')[0];
+    if (!te || isNaN(lat) || isNaN(lon)) continue;
+    const t = Date.parse(te.textContent.trim());
+    if (isNaN(t)) continue;
+    pts.push({ lat, lon, t });
+  }
+  // 按时间排序并去掉时间重复的点
+  pts.sort((a, b) => a.t - b.t);
+  pts = pts.filter((p, i) => i === 0 || p.t > pts[i - 1].t);
+  if (pts.length < 2) throw new Error('轨迹点不足（需要带 <time> 的轨迹点）');
+
+  // 相对时间（秒）和累计距离（米）
+  const t0 = pts[0].t;
+  let dist = 0;
+  pts.forEach((p, i) => {
+    p.s = (p.t - t0) / 1000;
+    if (i) dist += haversine(pts[i - 1].lat, pts[i - 1].lon, p.lat, p.lon);
+    p.d = dist;
+  });
+
+  // 每个点的平滑速度：取时间窗口内首尾两点，用累计距离差 / 时间差
+  const half = GPX_WINDOW / 2;
+  for (let i = 0; i < pts.length; i++) {
+    let j = i, k = i;
+    while (j > 0 && pts[j - 1].s >= pts[i].s - half) j--;
+    while (k < pts.length - 1 && pts[k + 1].s <= pts[i].s + half) k++;
+    // 窗口内没有邻居（采样间隔很长）时，至少用相邻的一段
+    if (j === k) { if (k < pts.length - 1) k++; else j--; }
+    const dt = pts[k].s - pts[j].s;
+    let v = dt > 0 ? (pts[k].d - pts[j].d) / dt * 3.6 : 0;
+    if (v > 200) v = 0; // 明显的定位跳点
+    pts[i].v = v;
+  }
+  return pts;
+}
+
+// 当前回放时刻的速度：在相邻两点的平滑速度之间线性插值
+function gpxSpeedAt(t) {
+  const p = gpx.pts;
+  if (t <= 0) return p[0].v;
+  if (t >= gpx.duration) return p[p.length - 1].v;
+  let lo = 0, hi = p.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (p[m].s <= t) lo = m; else hi = m; }
+  const f = (t - p[lo].s) / (p[hi].s - p[lo].s);
+  return p[lo].v + (p[hi].v - p[lo].v) * f;
+}
+
+function loadGPXFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      gpx.pts = parseGPX(reader.result);
+      gpx.duration = gpx.pts[gpx.pts.length - 1].s;
+      gpx.t = 0;
+      gpx.playing = true;
+      gpx.name = file.name;
+      setMode('gpx');
+      resetMax(true);
+      toast(`已载入 ${file.name}（${gpx.pts.length} 点，${fmtDur(gpx.duration)}）`, 3000);
+    } catch (e) {
+      toast('GPX 读取失败：' + e.message, 4000);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function stepGPX(dt) {
+  if (!gpx.pts) return null;
+  if (gpx.playing) {
+    gpx.t += dt * gpx.rate;
+    if (gpx.t >= gpx.duration) { gpx.t = gpx.duration; gpx.playing = false; }
+  }
+  return gpxSpeedAt(gpx.t);
+}
+
+function toggleGPXPlay() {
+  if (!gpx.pts) { toast('请先拖入 GPX 文件'); return; }
+  if (!gpx.playing && gpx.t >= gpx.duration) { gpx.t = 0; resetMax(true); } // 播完后重新开始
+  gpx.playing = !gpx.playing;
+}
+
+function setGPXRate(r) {
+  gpx.rate = r;
+  $('rate').value = String(r);
+  toast(`回放倍速 ${r}×`);
+}
+
+// 拖放 GPX 文件到页面任意位置
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadGPXFile(f);
+});
+
+/* ============ 速度来源 4：GPS（Geolocation API） ============ */
+
+const gps = { watchId: null, v: null, last: null, lastFix: 0, acc: null, err: '' };
+const GPS_STALE_MS = 5000; // 超过 5 秒没有新定位视为信号丢失
+
+function startGPS() {
+  if (gps.watchId !== null) return;
+  gps.err = '';
+  if (!('geolocation' in navigator)) { gps.err = '此浏览器不支持定位'; return; }
+  if (!window.isSecureContext) gps.err = '需要 HTTPS 才能定位';
+  // 第一次调用时 Safari 会弹出“允许使用你的位置”对话框，所以必须在用户点击/按键时调用
+  gps.watchId = navigator.geolocation.watchPosition(onGPS, onGPSError, {
+    enableHighAccuracy: true, // 要求使用 GPS 而不是 Wi-Fi 粗定位
+    maximumAge: 0,
+    timeout: 15000
+  });
+  updateStartBtn();
+}
+
+function stopGPS() {
+  if (gps.watchId !== null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.watchId = null;
+  updateStartBtn();
+}
+
+// GPS 模式但还没开始定位时，显示“开启定位”大按钮（手机打开页面后点一下即可）
+function updateStartBtn() {
+  $('startGps').style.display = cfg.mode === 'gps' && gps.watchId === null ? 'block' : 'none';
+}
+
+function onGPS(pos) {
+  const c = pos.coords;
+  let v = null;
+  if (c.speed !== null && c.speed !== undefined && !isNaN(c.speed) && c.speed >= 0) {
+    // 设备直接给出的速度（m/s），iPhone 上是基于多普勒的，比较准
+    v = c.speed * 3.6;
+  } else if (gps.last) {
+    // 设备不给速度时，用相邻两次定位的距离 / 时间估算
+    const dt = (pos.timestamp - gps.last.t) / 1000;
+    if (dt >= 0.5) v = haversine(gps.last.lat, gps.last.lon, c.latitude, c.longitude) / dt * 3.6;
+  }
+  gps.last = { lat: c.latitude, lon: c.longitude, t: pos.timestamp };
+  gps.lastFix = performance.now();
+  gps.acc = c.accuracy;
+  gps.err = '';
+  if (v !== null && v < 200) gps.v = v; // 丢弃明显异常的跳点
+  if (rec.on) recordPoint(c, pos.timestamp);
+}
+
+function onGPSError(err) {
+  gps.err = { 1: '定位权限被拒绝', 2: '无法获取位置', 3: '定位超时' }[err.code] || err.message;
+  if (err.code === 1) {
+    // 被拒绝后停止监听，“开启定位”按钮会重新出现，改完系统设置后可以再点
+    stopGPS();
+    toast('定位被拒绝：设置 → 隐私与安全性 → 定位服务 → Safari 网站 → 使用 App 期间', 7000);
+  }
+}
+
+/* ============ 屏幕常亮（Screen Wake Lock，避免手机自动锁屏） ============ */
+
+let wakeLock = null;
+let wakeState = 'off';   // off / on / unsupported / failed
+let wakePending = false;
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) { wakeState = 'unsupported'; return; }
+  if (wakeLock || wakePending || document.visibilityState !== 'visible') return;
+  wakePending = true;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeState = 'on';
+    // 切到后台、锁屏时系统会自动释放，回到前台再重新申请
+    wakeLock.addEventListener('release', () => { wakeLock = null; wakeState = 'off'; });
+  } catch (e) {
+    wakeState = 'failed';
+  }
+  wakePending = false;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+  else saveRec(); // 切到后台时把记录写入本地，防止页面被系统回收
+});
+addEventListener('pagehide', () => saveRec());
+
+/* ============ 轨迹记录（GPS 模式下记录，导出为 GPX） ============ */
+
+const REC_KEY = 'xrsnow.track.v1';
+const rec = { on: false, pts: [], start: 0, dist: 0, exported: true, unsaved: 0 };
+
+// 页面意外关闭/刷新后，从本地恢复上一段记录
+function loadRec() {
+  try {
+    const r = JSON.parse(localStorage.getItem(REC_KEY) || 'null');
+    if (r && Array.isArray(r.pts) && r.pts.length) {
+      Object.assign(rec, { pts: r.pts, start: r.start, dist: r.dist || 0, exported: !!r.exported });
+    }
+  } catch (e) { /* 忽略 */ }
+}
+function saveRec() {
+  rec.unsaved = 0;
+  try {
+    localStorage.setItem(REC_KEY, JSON.stringify(
+      { pts: rec.pts, start: rec.start, dist: rec.dist, exported: rec.exported }));
+  } catch (e) { /* 存储满了也不影响内存里的记录，导出仍然可用 */ }
+}
+
+function recordPoint(c, t) {
+  if (c.accuracy > 50) return;               // 误差太大的点不记录
+  const last = rec.pts[rec.pts.length - 1];
+  if (last) {
+    if (t - last.t < 900) return;            // 最多每秒 1 个点
+    rec.dist += haversine(last.lat, last.lon, c.latitude, c.longitude);
+  }
+  rec.pts.push({
+    lat: +c.latitude.toFixed(7),
+    lon: +c.longitude.toFixed(7),
+    ele: c.altitude === null || c.altitude === undefined ? null : +c.altitude.toFixed(1),
+    t,
+    v: c.speed !== null && c.speed >= 0 ? +c.speed.toFixed(2) : null // m/s
+  });
+  rec.exported = false;
+  if (++rec.unsaved >= 10) saveRec();        // 每 10 个点保存一次
+}
+
+function startRec() {
+  if (rec.pts.length && !rec.exported &&
+      !confirm(`上一段轨迹（${rec.pts.length} 点）还没导出，开始新记录会覆盖它。继续吗？`)) return;
+  if (cfg.mode !== 'gps') setMode('gps');    // 记录需要真实 GPS
+  Object.assign(rec, { on: true, pts: [], dist: 0, start: Date.now(), exported: false });
+  saveRec();
+  resetMax(true);
+  toast('● 开始记录轨迹');
+  syncPanel();
+}
+function stopRec() {
+  rec.on = false;
+  saveRec();
+  toast(`记录已停止：${rec.pts.length} 点，${(rec.dist / 1000).toFixed(2)} km`, 3000);
+  syncPanel();
+}
+function toggleRec() { rec.on ? stopRec() : startRec(); }
+
+// 生成 GPX 1.1 文本（速度写在 Garmin 扩展里，常见软件都能识别）
+function buildGPX() {
+  const iso = (t) => new Date(t).toISOString();
+  const body = rec.pts.map((p) =>
+    `      <trkpt lat="${p.lat}" lon="${p.lon}">` +
+    (p.ele !== null ? `<ele>${p.ele}</ele>` : '') +
+    `<time>${iso(p.t)}</time>` +
+    (p.v !== null ? `<extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>${p.v}</gpxtpx:speed></gpxtpx:TrackPointExtension></extensions>` : '') +
+    `</trkpt>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="XR SNOW HUD"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2">
+  <metadata><time>${iso(rec.start || rec.pts[0].t)}</time></metadata>
+  <trk>
+    <name>XR SNOW ${new Date(rec.start || rec.pts[0].t).toLocaleString()}</name>
+    <trkseg>
+${body}
+    </trkseg>
+  </trk>
+</gpx>
+`;
+}
+
+async function exportGPX() {
+  if (!rec.pts.length) { toast('还没有记录到轨迹点'); return; }
+  const d = new Date(rec.start || rec.pts[0].t);
+  const name = `xrsnow-${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.gpx`;
+  const file = new File([buildGPX()], name, { type: 'application/gpx+xml' });
+
+  // 手机上优先用系统分享面板：可以“存储到文件”、隔空投送、发邮件等
+  const isTouch = matchMedia('(pointer: coarse)').matches;
+  if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: name });
+      rec.exported = true; saveRec();
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // 用户取消了分享
+    }
+  }
+  // 电脑上（或分享不可用时）直接下载
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  rec.exported = true; saveRec();
+  toast('已导出 ' + name);
+}
+
+/* ============ 模式切换 ============ */
+
+function setMode(m) {
+  if (!MODE_NAMES[m]) return;
+  if (cfg.mode === 'gps' && m !== 'gps') {
+    if (rec.on) stopRec(); // 离开 GPS 模式时停止记录（已记录的点保留，可以导出）
+    stopGPS();
+  }
+  // 切换时让手动模式从当前显示速度开始，体验更连续
+  if (m === 'manual') manual.v = Math.round(disp);
+  if (m === 'auto') { auto.v = disp; auto.a = 0; auto.nextChange = 0; }
+  cfg.mode = m;
+  saveCfg();
+  if (m === 'gps') startGPS(); // setMode 总是由点击/按键触发，可以直接请求定位权限
+  updateStartBtn();
+  if (m === 'gpx' && !gpx.pts) toast('把 GPX 文件拖进窗口（或在设置里选择文件）', 3500);
+  else toast('速度来源：' + MODE_NAMES[m]);
+  requestWakeLock();
+  syncPanel();
+}
+
+/* ============ 最高速度 ============ */
+
+let maxSpeed = 0;
+function resetMax(silent) {
+  maxSpeed = 0;
+  if (!silent) toast('已清零最高速度');
+}
+
+/* ============ 渲染 ============ */
+
+const el = {
+  hud: $('hud'), speed: $('speed'), unit: $('unit'),
+  max: $('max'), clock: $('clock'), status: $('status'), subRow: $('subRow'), rec: $('rec')
+};
+let disp = 0;        // 显示用的平滑速度
+let warnLevel = 0;   // 0 正常 / 1 橙色 / 2 红色
+let lastFrame = performance.now();
+const shown = {};    // 记录已写入 DOM 的值，避免每帧重复写
+
+function setText(node, key, text) {
+  if (shown[key] !== text) { node.textContent = text; shown[key] = text; }
+}
+
+// 超速等级，带 2 km/h 回差，避免在阈值附近颜色来回闪
+function updateWarn(v) {
+  const t1 = cfg.threshold, t2 = cfg.threshold + 10, hys = 2;
+  const up = v >= t2 ? 2 : v >= t1 ? 1 : 0;                 // 速度上升时至少到这个等级
+  const down = v >= t2 - hys ? 2 : v >= t1 - hys ? 1 : 0;   // 速度下降时最多保持到这个等级
+  warnLevel = clamp(warnLevel, up, down);
+}
+
+// 把设置应用到 HUD 外观（字号、位置、颜色、亮度）
+function applyStyle() {
+  const s = cfg.size;
+  el.hud.style.left = (W / 2 + cfg.offX) + 'px';
+  el.hud.style.top = (H / 2 + cfg.offY) + 'px';
+  el.hud.style.opacity = cfg.bright / 100; // 背景纯黑，降低不透明度就等于降低亮度
+  el.hud.style.color = COLORS[cfg.color] || COLORS.white;
+  el.speed.style.fontSize = s + 'px';
+  el.unit.style.fontSize = Math.round(s * 0.2) + 'px';
+  el.subRow.style.fontSize = Math.max(12, Math.round(s * 0.17)) + 'px';
+  el.status.style.fontSize = Math.max(10, Math.round(s * 0.11)) + 'px';
+  el.status.style.display = cfg.showStatus ? '' : 'none';
+  el.rec.style.fontSize = Math.max(10, Math.round(s * 0.11)) + 'px';
+  shown.warn = undefined; // 颜色变了，强制重设超速颜色
+}
+
+function statusText() {
+  switch (cfg.mode) {
+    case 'manual': return '手动模拟 ↑↓';
+    case 'auto': return '自动模拟';
+    case 'gpx':
+      if (!gpx.pts) return 'GPX：拖入文件';
+      return `GPX ${gpx.playing ? '▶' : '❚❚'} ${gpx.rate}×  ${fmtDur(gpx.t)} / ${fmtDur(gpx.duration)}`;
+    case 'gps':
+      if (gps.err && gps.lastFix === 0) return 'GPS：' + gps.err;
+      if (gps.lastFix === 0) return 'GPS 等待定位…';
+      if (performance.now() - gps.lastFix > GPS_STALE_MS) return 'GPS 信号丢失';
+      return `GPS ±${Math.round(gps.acc)}m` + (wakeState === 'on' ? ' · 常亮' : ' · 未常亮');
+  }
+  return '';
+}
+
+function frame(now) {
+  const rawDt = (now - lastFrame) / 1000;
+  const dt = Math.min(0.1, rawDt); // 模拟与平滑用：限制单帧步长，切回标签页时不会突变
+  lastFrame = now;
+
+  // 1. 从当前来源取速度（null 表示暂时没有数据）
+  let src = null, tau = 0, stale = false;
+  switch (cfg.mode) {
+    case 'manual': src = manual.v; break;
+    case 'auto': src = stepAuto(dt, now); break;
+    // GPX 按真实时间推进：即使帧率掉了，回放时钟也不能变慢
+    case 'gpx': src = stepGPX(Math.min(2, rawDt)); tau = 0.4; break;
+    case 'gps':
+      src = gps.v; tau = 0.6;
+      stale = gps.lastFix === 0 || now - gps.lastFix > GPS_STALE_MS;
+      break;
+  }
+
+  // 2. 显示层再做一次指数平滑，避免数字乱跳（手动/自动模式不需要）
+  if (src !== null) {
+    disp = tau > 0 ? disp + (src - disp) * (1 - Math.exp(-dt / tau)) : src;
+    if (disp < 0.5) disp = Math.max(0, disp);
+    if (!stale) maxSpeed = Math.max(maxSpeed, disp);
+  }
+
+  // 3. 写入 DOM
+  const v = Math.round(disp);
+  setText(el.speed, 'speed', src === null ? '--' : String(v));
+  setText(el.max, 'max', 'MAX ' + Math.round(maxSpeed));
+  const d = new Date();
+  setText(el.clock, 'clock', pad2(d.getHours()) + ':' + pad2(d.getMinutes()));
+  if (cfg.showStatus) setText(el.status, 'status', statusText());
+
+  // 记录中：HUD 上显示红点和时长（不受“状态行”开关影响）
+  if (shown.recOn !== rec.on) { el.rec.style.display = rec.on ? '' : 'none'; shown.recOn = rec.on; }
+  if (rec.on) setText(el.rec, 'rec', '● REC ' + fmtDur((Date.now() - rec.start) / 1000));
+  if (isPanelOpen()) setText($('recInfo'), 'recInfo', rec.pts.length
+    ? `${rec.pts.length} 点 · ${(rec.dist / 1000).toFixed(2)} km${rec.exported ? ' · 已导出' : ''}` : '无记录');
+
+  const isStale = stale && src !== null;
+  if (shown.stale !== isStale) { el.speed.classList.toggle('stale', isStale); shown.stale = isStale; }
+
+  updateWarn(src === null ? 0 : disp);
+  if (shown.warn !== warnLevel) {
+    const c = warnLevel === 2 ? WARN_RED : warnLevel === 1 ? WARN_ORANGE : '';
+    el.speed.style.color = c;
+    el.unit.style.color = c;
+    shown.warn = warnLevel;
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* ============ 设置面板 ============ */
+
+const panel = $('panel');
+let peekTimer = 0;
+
+function isPanelOpen() { return panel.classList.contains('open'); }
+
+function togglePanel(force) {
+  const open = force !== undefined ? force : !isPanelOpen();
+  panel.classList.toggle('open', open);
+  stage.classList.toggle('guide', open);
+  if (open) syncPanel();
+  updateCursor();
+}
+
+// 调整位置/字号时让面板暂时变淡，能直接看到 HUD 的效果
+function peek() {
+  panel.classList.add('peek');
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => panel.classList.remove('peek'), 1200);
+}
+
+// 把 cfg 同步到面板控件上
+function syncPanel() {
+  panel.querySelectorAll('input[data-k]').forEach((inp) => { inp.value = cfg[inp.dataset.k]; });
+  panel.querySelectorAll('output[data-o]').forEach((o) => {
+    const k = o.dataset.o;
+    o.textContent = k === 'bright' ? cfg[k] + '%' : k === 'threshold' ? cfg[k] + ' km/h' : cfg[k];
+  });
+  panel.querySelectorAll('#modeBtns button').forEach((b) => b.classList.toggle('on', b.dataset.mode === cfg.mode));
+  panel.querySelectorAll('#colorBtns button').forEach((b) => b.classList.toggle('on', b.dataset.color === cfg.color));
+  $('showStatus').checked = cfg.showStatus;
+  $('gpxRow').style.display = cfg.mode === 'gpx' ? '' : 'none';
+  $('rate').value = String(gpx.rate);
+  $('recBtn').textContent = rec.on ? '■ 停止记录 (L)' : '● 开始记录 (L)';
+  $('recBtn').classList.toggle('rec', rec.on);
+  shown.recInfo = undefined;
+}
+
+// 修改某个设置：保存 + 刷新外观
+function setCfg(k, v) {
+  cfg[k] = v;
+  saveCfg();
+  applyStyle();
+  syncPanel();
+}
+
+panel.querySelectorAll('input[data-k]').forEach((inp) => {
+  inp.addEventListener('input', () => {
+    setCfg(inp.dataset.k, Number(inp.value));
+    if (['size', 'offX', 'offY'].includes(inp.dataset.k)) peek();
+  });
+});
+panel.querySelectorAll('#modeBtns button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+panel.querySelectorAll('#colorBtns button').forEach((b) => b.addEventListener('click', () => setCfg('color', b.dataset.color)));
+$('showStatus').addEventListener('change', (e) => setCfg('showStatus', e.target.checked));
+$('gpxFile').addEventListener('change', (e) => loadGPXFile(e.target.files[0]));
+$('rate').addEventListener('change', (e) => setGPXRate(Number(e.target.value)));
+$('playBtn').addEventListener('click', toggleGPXPlay);
+$('fsBtn').addEventListener('click', toggleFullscreen);
+$('resetMaxBtn').addEventListener('click', () => resetMax());
+$('centerBtn').addEventListener('click', () => { cfg.offX = 0; setCfg('offY', 0); });
+$('defaultsBtn').addEventListener('click', () => {
+  const mode = cfg.mode;
+  cfg = Object.assign({}, DEFAULTS, { mode });
+  saveCfg(); applyStyle(); syncPanel();
+  toast('已恢复默认设置');
+});
+$('closeBtn').addEventListener('click', () => togglePanel(false));
+$('recBtn').addEventListener('click', toggleRec);
+$('exportBtn').addEventListener('click', exportGPX);
+$('startGps').addEventListener('click', (e) => {
+  e.stopPropagation();
+  startGPS();        // 触发定位权限对话框
+  requestWakeLock(); // 同一次点击里申请屏幕常亮
+});
+
+// 面板内的点击不要冒泡到背景（背景点击 = 开关面板）
+panel.addEventListener('click', (e) => e.stopPropagation());
+panel.addEventListener('dblclick', (e) => e.stopPropagation());
+
+// 点击黑色背景开关面板（手机上没有键盘，靠这个）；双击切换全屏
+stage.addEventListener('click', () => { togglePanel(); requestWakeLock(); });
+stage.addEventListener('dblclick', toggleFullscreen);
+
+/* ============ 全屏 ============ */
+
+function toggleFullscreen() {
+  const doc = document, root = doc.documentElement;
+  const fsEl = doc.fullscreenElement || doc.webkitFullscreenElement;
+  if (fsEl) {
+    (doc.exitFullscreen || doc.webkitExitFullscreen).call(doc);
+  } else if (root.requestFullscreen) {
+    root.requestFullscreen().catch(() => toast('浏览器拒绝了全屏请求'));
+  } else if (root.webkitRequestFullscreen) {
+    root.webkitRequestFullscreen();
+  } else {
+    // iPhone Safari 不支持网页元素全屏
+    toast('iPhone 请用 分享 → 添加到主屏幕 来全屏打开', 4000);
+  }
+}
+
+/* ============ 鼠标指针：2 秒不动就隐藏（不然会显示在眼前） ============ */
+
+let cursorTimer = 0;
+function updateCursor() {
+  document.body.classList.remove('hide-cursor');
+  clearTimeout(cursorTimer);
+  if (!isPanelOpen()) cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 2000);
+}
+addEventListener('mousemove', updateCursor);
+
+/* ============ 键盘 ============ */
+
+addEventListener('keydown', (e) => {
+  const k = e.key;
+  // 焦点在滑块上时，方向键交给滑块本身处理
+  const onRange = e.target.tagName === 'INPUT' && e.target.type === 'range';
+  if (onRange && k.startsWith('Arrow')) return;
+  // 焦点在按钮上时，空格/回车交给按钮
+  if (e.target.tagName === 'BUTTON' && (k === ' ' || k === 'Enter')) return;
+
+  if (k === 'f' || k === 'F') { toggleFullscreen(); return; }
+  if (k === 's' || k === 'S') { togglePanel(); return; }
+  if (k === 'Escape' && isPanelOpen()) { togglePanel(false); return; }
+  if (k === 'r' || k === 'R') { resetMax(); return; }
+  if (k === 'l' || k === 'L') { toggleRec(); return; }
+  if (k === 'e' || k === 'E') { exportGPX(); return; }
+  if (k >= '1' && k <= '4') { setMode(['manual', 'auto', 'gpx', 'gps'][k - 1]); return; }
+
+  // 面板打开时：方向键移动画面，+/- 调字号
+  if (isPanelOpen()) {
+    const step = e.shiftKey ? 10 : 1;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[k]) {
+      e.preventDefault();
+      cfg.offX = clamp(cfg.offX + moves[k][0], -300, 300);
+      setCfg('offY', clamp(cfg.offY + moves[k][1], -190, 190));
+      peek();
+      return;
+    }
+    if (k === '+' || k === '=') { setCfg('size', clamp(cfg.size + 4, 60, 300)); peek(); return; }
+    if (k === '-' || k === '_') { setCfg('size', clamp(cfg.size - 4, 60, 300)); peek(); return; }
+  }
+
+  // 手动模式：上下键加减速
+  if (cfg.mode === 'manual' && (k === 'ArrowUp' || k === 'ArrowDown')) {
+    e.preventDefault();
+    const step = e.shiftKey ? 5 : 1;
+    manual.v = clamp(manual.v + (k === 'ArrowUp' ? step : -step), 0, 199);
+    return;
+  }
+
+  // GPX 模式：空格播放/暂停，左右键快进后退，[ ] 调倍速
+  if (cfg.mode === 'gpx') {
+    if (k === ' ') { e.preventDefault(); toggleGPXPlay(); return; }
+    if (gpx.pts && (k === 'ArrowLeft' || k === 'ArrowRight')) {
+      e.preventDefault();
+      gpx.t = clamp(gpx.t + (k === 'ArrowRight' ? 10 : -10), 0, gpx.duration);
+      return;
+    }
+    const rates = [1, 2, 4, 8, 16];
+    const i = rates.indexOf(gpx.rate);
+    if (k === ']') { setGPXRate(rates[Math.min(rates.length - 1, i + 1)]); return; }
+    if (k === '[') { setGPXRate(rates[Math.max(0, i - 1)]); return; }
+  }
+});
+
+/* ============ 启动 ============ */
+
+fitStage();
+applyStyle();
+syncPanel();
+loadRec();
+updateStartBtn(); // 打开页面时不自动定位：iPhone 需要用户点一下才能弹出权限对话框
+updateCursor();
+if (rec.pts.length && !rec.exported) {
+  toast(`有一段未导出的轨迹（${rec.pts.length} 点），可在设置里导出`, 5000);
+} else {
+  toast(matchMedia('(pointer: coarse)').matches ? '点击屏幕打开设置'
+                                                : 'S 设置 · F 全屏 · 1–4 切换速度来源', 3500);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
