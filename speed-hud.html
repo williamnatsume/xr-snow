@@ -100,10 +100,21 @@
   .btns { display: flex; gap: 6px; flex-wrap: wrap; }
   #gpxFile { flex: 1; min-width: 0; font-size: 12px; color: #aaa; }
   .help { margin-top: 6px; color: #777; font-size: 11px; line-height: 1.5; }
+  /* iPhone 竖屏提示：iPhone 接模组是整屏镜像，竖屏画面在 16:10 模组上会缩得很小 */
+  #rotateHint {
+    display: none; position: fixed; inset: 0; z-index: 10;
+    align-items: center; justify-content: center; text-align: center;
+    background: #000; color: #33ff66; font-size: 22px; line-height: 1.6;
+  }
+  #rotateHint small { font-size: 14px; color: #8c8; }
+  @media (pointer: coarse) and (orientation: portrait) {
+    #rotateHint { display: flex; }
+  }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 </style>
 </head>
 <body>
+<div id="rotateHint"><div>请把 iPhone 横过来<br><small>横屏时模组上的画面最大<br>（关闭控制中心里的“竖排方向锁定”）</small></div></div>
 <div id="stage">
   <div id="crossH"></div><div id="crossV"></div>
 
@@ -170,7 +181,8 @@
       面板打开时：方向键移动画面（Shift = 10px），+ / − 调字号，S 或 Esc 关闭。<br>
       手动模式：↑↓ 加减速（Shift = 5）。GPX：空格 播放/暂停，←→ 快进/后退 10 秒，[ ] 调回放倍速。<br>
       轨迹记录（GPS 模式）：L 开始/停止，E 导出 GPX；记录会自动保存在本地，页面意外关闭也不丢。<br>
-      超过阈值变橙色，超过阈值 +10 变红色。设置自动保存在本浏览器。
+      超过阈值变橙色，超过阈值 +10 变红色。设置自动保存在本浏览器。<br>
+      iPhone 接模组：iPhone 不会弹提示，有画面就是连上了；画面是整屏镜像，请横屏并用“添加到主屏幕”打开。
     </div>
   </div>
 </div>
