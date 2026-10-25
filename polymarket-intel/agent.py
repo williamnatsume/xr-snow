@@ -1,4 +1,4 @@
-"""Polymarket 情报 agent：Claude 自己调用 Polymarket 数据工具 + 网页搜索，写出中文情报简报。
+"""Polymarket 情报 agent：Claude 调用 Polymarket 数据、行情和网页搜索，把预测市场的情报转成美股 / 日股 / 港股 / 加密货币的交易思路。
 
 用法：
   python agent.py                         # 全站扫描，自动挑重点
@@ -17,31 +17,15 @@ from pathlib import Path
 import anthropic
 from anthropic import beta_tool
 
+import ideas
 import polymarket as pm
+import quotes
 import scan
 
 MODEL = "claude-opus-5-5"
 REPORT_DIR = Path(__file__).with_name("reports")
 
-SYSTEM = """你是一名预测市场情报分析师，任务是从 Polymarket 的盘口和资金流里挖出"有用的情报"：
-市场正在给什么事件重新定价、聪明钱/大户在押什么、哪些概率变化领先于新闻。
-
-工作方法：
-1. 先调用 scan_signals 拿到全站异动信号（价格异动、成交暴增、新热门市场、大单资金流、与上次扫描的变化）。
-   如果用户给了主题，再用 search_markets 找相关市场。
-2. 挑出最值得深挖的 5-8 个市场。对每个市场按需查看价格走势、大单、持仓大户；
-   对可疑的大户可以查看其钱包持仓，判断是不是长期盈利的老手、是否集中押注同一主题。
-3. 如果可以用网页搜索，就查证异动背后有没有新闻驱动。没有对应新闻的异动（可能是信息领先）尤其值得标出。
-4. 过滤噪音：体育单场、加密币小时级涨跌盘、流动性很差的盘口，除非异常极其明显，否则不要写。
-
-输出一份中文 Markdown 简报：
-- 开头"一句话总结"
-- "重点情报"：每条包括 市场与当前概率、发生了什么（数据）、可能原因（标明是已证实新闻还是推测）、
-  值得关注的点 / 后续观察信号、Polymarket 链接
-- "资金动向"：值得注意的大户/集中下注
-- "观察清单"：接下来值得盯的市场
-数据要具体（概率、变动幅度、金额）。区分事实与推断，不要编造新闻；没查到就说没查到。
-这只是信息整理，不构成投资建议。"""
+SYSTEM = Path(__file__).with_name("prompt.md").read_text(encoding="utf-8")
 
 
 def _tool(fn):
@@ -145,17 +129,37 @@ def wallet_positions(address: str) -> list:
     return pm.wallet_positions(address)
 
 
-TOOLS = [scan_signals, search_markets, get_market, price_history,
-         market_large_trades, market_top_holders, wallet_positions]
-WEB_SEARCH = {"type": "web_search_20260209", "name": "web_search", "max_uses": 15}
+@_tool
+def get_quote(symbol: str) -> dict:
+    """查询股票 / ETF / 加密货币 / 汇率的最新价格及 1 日、5 日、1 个月涨跌幅，用来判断事件是否已被定价。
+
+    Args:
+        symbol: Yahoo Finance 代码。美股 NVDA，日股 7203.T，港股 0700.HK，加密 BTC-USD，日元 JPY=X，日经 ^N225，恒指 ^HSI。
+    """
+    return quotes.quote(symbol)
+
+
+@_tool
+def review_past_ideas(days: int = 14) -> list:
+    """列出最近几天简报给出的交易思路，以及从给出时到现在按方向计算的收益（return_in_direction）。
+
+    Args:
+        days: 回看天数。
+    """
+    return ideas.review(days)
+
+
+TOOLS = [review_past_ideas, scan_signals, search_markets, get_market, price_history,
+         market_large_trades, market_top_holders, wallet_positions, get_quote]
+WEB_SEARCH = {"type": "web_search_20260209", "name": "web_search", "max_uses": 20}
 
 
 def run(topic: str | None, use_web: bool = True, verbose: bool = True) -> str:
     client = anthropic.Anthropic()
     tools = TOOLS + ([WEB_SEARCH] if use_web else [])
-    today = datetime.now().strftime("%Y-%m-%d")
-    ask = (f"今天是 {today}。请围绕主题「{topic}」从 Polymarket 上挖情报，写一份简报。" if topic
-           else f"今天是 {today}。请扫描 Polymarket 全站，写一份今日情报简报。")
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    ask = (f"现在是 {now}。请围绕主题「{topic}」从 Polymarket 上找可交易的机会，写一份简报。" if topic
+           else f"现在是 {now}。请扫描 Polymarket 全站，写一份交易机会简报。")
     messages: list = [{"role": "user", "content": ask}]
 
     # 网页搜索是服务端工具，长回合可能返回 pause_turn；Python 的 tool runner 不会自动续上，
@@ -205,7 +209,8 @@ def main() -> None:
     ap.add_argument("-q", "--quiet", action="store_true", help="不打印工具调用过程")
     args = ap.parse_args()
 
-    report = run(args.topic, use_web=not args.no_web, verbose=not args.quiet)
+    report, new_ideas = ideas.extract(run(args.topic, use_web=not args.no_web, verbose=not args.quiet))
+    ideas.record(new_ideas)
     REPORT_DIR.mkdir(exist_ok=True)
     path = REPORT_DIR / f"{datetime.now():%Y-%m-%d_%H%M}.md"
     path.write_text(report, encoding="utf-8")
