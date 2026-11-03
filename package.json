@@ -1,0 +1,11 @@
+{
+  "name": "xr-snow",
+  "private": true,
+  "type": "module",
+  "description": "XR SNOW：滑雪镜 HUD 原型与滑雪场语音导航 MVP",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "import:kagura": "node tools/import-osm.mjs"
+  }
+}

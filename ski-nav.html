@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b1220">
+<title>雪场语音导航</title>
+<style>
+  :root {
+    --bg: #eef2f6; --card: #ffffff; --text: #0f172a; --muted: #5b6577; --line: #d6dde6;
+    --accent: #2563eb; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --warn-bg: #fff4e0; --bad-bg: #fde8e8; --ok-bg: #e5f6ea; --info-bg: #e8effd;
+    --map-bg: #f8fafc; --run-green: #1f9d55; --run-red: #dc2626; --run-black: #111827; --run-expert: #7c3aed;
+    --run-unknown: #94a3b8; --connector: #64748b; --lift: #475569; --route: rgba(37, 99, 235, .35);
+    --me: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1220; --card: #141c2b; --text: #e6ebf2; --muted: #9aa6b8; --line: #273246;
+      --accent: #3b82f6; --warn-bg: #3a2a0c; --bad-bg: #3b1414; --ok-bg: #0f2e1a; --info-bg: #13233f;
+      --map-bg: #0f1726; --run-black: #e5e7eb; --lift: #94a3b8; --connector: #94a3b8; --route: rgba(96, 165, 250, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1220; --card: #141c2b; --text: #e6ebf2; --muted: #9aa6b8; --line: #273246;
+    --accent: #3b82f6; --warn-bg: #3a2a0c; --bad-bg: #3b1414; --ok-bg: #0f2e1a; --info-bg: #13233f;
+    --map-bg: #0f1726; --run-black: #e5e7eb; --lift: #94a3b8; --connector: #94a3b8; --route: rgba(96, 165, 250, .35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, "Hiragino Sans", "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 16px; line-height: 1.45;
+    padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 980px) { .wrap { grid-template-columns: minmax(380px, 460px) 1fr; align-items: start; } .col-right { position: sticky; top: 12px; } }
+  .col { display: grid; gap: 14px; min-width: 0; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 0 2px; }
+  header h1 { font-size: 20px; margin: 0; flex: 1 1 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  select, input[type=text], textarea {
+    font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  button {
+    font: inherit; font-weight: 600; min-height: 52px; padding: 10px 16px; border-radius: 12px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--bad); }
+  button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 0; min-width: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  label.field { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+  label.check { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-weight: 600; }
+  label.check input { width: 22px; height: 22px; }
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .seg button { min-height: 48px; padding: 6px; }
+  .banner { border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+  .banner.bad { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+  .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .banner.info { background: var(--info-bg); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+  .badge.fictional { background: var(--bad-bg); color: var(--bad); }
+  .badge.unverified { background: var(--warn-bg); color: var(--warn); }
+  .badge.verified { background: var(--ok-bg); color: var(--ok); }
+
+  /* 导航主卡片 */
+  #navCard .dest { font-size: 15px; color: var(--muted); }
+  #navCard .dest b { color: var(--text); font-size: 18px; }
+  #instr { font-size: 30px; font-weight: 800; line-height: 1.25; margin: 8px 0 4px; min-height: 2.5em; overflow-wrap: anywhere; }
+  #instr.dim { color: var(--muted); font-weight: 700; font-size: 22px; }
+  .bigline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  #dist { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #distLabel { color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+  .chip { font-size: 14px; font-weight: 700; padding: 6px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+  .chip.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+  .chip.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+  #flash { border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; background: var(--info-bg); font-weight: 700; display: none; }
+  #flash.show { display: block; }
+  #flash.loud { background: var(--bad-bg); color: var(--bad); font-size: 22px; }
+  #flash small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+
+  /* 规划结果 */
+  .summary { display: flex; flex-wrap: wrap; gap: 6px 16px; font-weight: 700; margin: 8px 0; }
+  .steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  .steps li { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: start; font-size: 14px; }
+  .dot { width: 12px; height: 12px; border-radius: 3px; margin-top: 4px; }
+  .steps .meta { color: var(--muted); font-size: 12px; }
+  .parsed { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .parsed .chip { font-weight: 600; }
+
+  /* 地图 */
+  #mapBox { position: relative; }
+  #map { width: 100%; height: 56vh; min-height: 320px; max-height: 720px; background: var(--map-bg); border-radius: 12px; touch-action: none; display: block; }
+  .mapctl { position: absolute; right: 8px; top: 8px; display: grid; gap: 6px; }
+  .mapctl button { min-height: 44px; min-width: 44px; padding: 4px 8px; background: var(--card); }
+  #map .run { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  #map .run.closed { opacity: .6; }
+  #map .flat { fill: none; stroke: var(--card); }
+  #map .lift { fill: none; stroke: var(--lift); }
+  #map .route { fill: none; stroke: var(--route); stroke-linecap: round; stroke-linejoin: round; }
+  #map .edge-label { fill: var(--text); font-weight: 700; paint-order: stroke; stroke: var(--map-bg); stroke-width: 3px; }
+  #map .edge-label.closed { fill: var(--bad); }
+  #map .poi { fill: var(--text); }
+  #map .poi-label { fill: var(--text); font-weight: 700; paint-order: stroke; stroke: var(--map-bg); stroke-width: 3px; }
+  #map .next-mark { fill: none; stroke: #f59e0b; }
+  #map .acc { fill: rgba(37, 99, 235, .14); stroke: rgba(37, 99, 235, .5); stroke-width: 1; }
+  #map .acc.stale, #map .me.stale { fill: rgba(148, 163, 184, .3); stroke: #94a3b8; }
+  #map .me { fill: var(--me); stroke: #fff; }
+  #map .truth { fill: none; stroke: #f97316; stroke-width: 2; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+
+  /* 模拟 / GPS */
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+  .simrow { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin: 8px 0; font-size: 14px; }
+  input[type=range] { width: 100%; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .hidden { display: none !important; }
+
+  /* 调试 */
+  details.card summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; margin: 8px 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .tbl-wrap { overflow-x: auto; max-height: 380px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--card); }
+  td.t { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+  tr.speak td { font-weight: 600; }
+  tr.text td { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>雪场语音导航 <span class="muted">MVP</span></h1>
+  <select id="resortSel" aria-label="选择雪场" style="width:auto; min-width: 220px"></select>
+  <span id="dataBadge" class="badge"></span>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <div id="disclaimer" class="banner bad"></div>
+
+    <!-- 导航主卡片 -->
+    <section class="card" id="navCard" aria-live="polite">
+      <div class="dest">前往 <b id="destName">—</b></div>
+      <div id="instr" class="dim">规划路线后开始导航</div>
+      <div class="bigline"><span id="dist">—</span><span id="distLabel"></span></div>
+      <div class="chips">
+        <span class="chip" id="stateChip">未开始</span>
+        <span class="chip" id="gpsChip">定位：—</span>
+        <span class="chip" id="speedChip">— km/h</span>
+      </div>
+      <div id="flash"></div>
+      <div class="row">
+        <button class="primary" id="startBtn">开始导航</button>
+        <button id="pauseBtn" disabled>暂停</button>
+        <button class="danger" id="stopBtn" disabled>结束</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="replayBtn">重播指令</button>
+        <button id="muteBtn" class="on">语音：开</button>
+        <button id="testVoiceBtn">测试声音</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="field">播报语言
+          <select id="langSel"><option value="zh">中文</option><option value="ja">日本語</option></select>
+        </label>
+      </div>
+      <p class="muted" id="voiceNote"></p>
+    </section>
+
+    <!-- 规划 -->
+    <section class="card" id="planCard">
+      <h2>目的地与偏好</h2>
+      <label class="field">用一句话说需求（本地规则解析，不联网）
+        <textarea id="nlInput" placeholder="例：去山脚餐厅，不走高级道，尽量别让我蹬着走"></textarea>
+      </label>
+      <div class="row" style="margin-top:8px"><button id="parseBtn">解析成下面的选项</button></div>
+      <div id="parseResult"></div>
+
+      <div class="grid2" style="margin-top:12px">
+        <label class="field">起点<select id="startSel"></select></label>
+        <label class="field">目的地<select id="destSel"></select></label>
+      </div>
+      <div style="margin-top:10px" class="muted">允许的最高难度</div>
+      <div class="seg" id="diffBtns">
+        <button data-d="1">初级</button><button data-d="2">中级</button><button data-d="3">高级</button><button data-d="4">专家</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <label class="check"><input type="checkbox" id="avoidFlat"> 尽量避开平路</label>
+        <label class="check"><input type="checkbox" id="preferShort"> 优先短路线</label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="primary" id="planBtn">规划路线</button></div>
+      <div id="planResult"></div>
+    </section>
+
+    <!-- 定位来源 -->
+    <section class="card" id="sourceCard">
+      <h2>定位来源</h2>
+      <div class="tabs">
+        <button id="tabSim" class="on">模拟器（测试）</button>
+        <button id="tabGps">真实 GPS</button>
+      </div>
+      <div id="simPanel">
+        <p class="muted">模拟一名滑雪者沿规划路线滑行（带左右 S 弯）。模拟数据只进入模拟模式，不会和真实 GPS 混用。</p>
+        <div class="row">
+          <button id="simPlay">▶ 播放</button>
+          <button id="simReset">↺ 重置</button>
+        </div>
+        <div class="simrow"><span>模拟速度</span>
+          <select id="simRate"><option value="1">1× 实时</option><option value="2">2×</option><option value="5" selected>5×</option><option value="10">10×</option><option value="20">20×</option></select><span></span></div>
+        <div class="simrow"><span>定位漂移</span><input type="range" id="simDrift" min="0" max="20" step="1" value="4"><span id="simDriftVal">4 m</span></div>
+        <div class="simrow"><span>滑雪者速度</span><input type="range" id="simSkier" min="0.5" max="1.6" step="0.1" value="1"><span id="simSkierVal">1.0×</span></div>
+        <label class="check" style="margin:8px 0"><input type="checkbox" id="simCarve" checked> 模拟左右 S 弯</label>
+        <div class="row">
+          <button id="simOutage">定位中断 20 秒</button>
+          <button id="simWrong">下一个岔口走错</button>
+        </div>
+        <p class="muted" id="simStatus"></p>
+      </div>
+      <div id="gpsPanel" class="hidden">
+        <div id="gpsBlocked" class="banner bad hidden"></div>
+        <div id="gpsAllowed">
+          <div class="banner warn" id="gpsWarn"></div>
+          <label class="check" style="margin:8px 0"><input type="checkbox" id="gpsAck"> 我知道数据未核实，会以现场路牌为准</label>
+          <div class="row">
+            <button id="gpsStartBtn">开启定位</button>
+            <button id="gpsHereBtn">用当前位置作起点</button>
+          </div>
+          <p class="muted" id="gpsStatus">网页只能在前台、屏幕亮着时定位和播报；iPhone 锁屏或切到其他 App 后会停止。位置只在本机内存中使用，不上传、不保存。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="col col-right">
+    <section class="card">
+      <h2 id="mapTitle">示意图</h2>
+      <div id="mapBox">
+        <svg id="map" role="img" aria-label="雪场示意图"></svg>
+        <div class="mapctl">
+          <button id="zoomIn" aria-label="放大">＋</button>
+          <button id="zoomOut" aria-label="缩小">－</button>
+          <button id="zoomFit" aria-label="全图">全图</button>
+          <button id="zoomFollow" aria-label="跟随位置">跟随</button>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--run-green)"></i>初级</span>
+        <span><i style="background:var(--run-red)"></i>中级</span>
+        <span><i style="background:var(--run-black)"></i>高级</span>
+        <span><i style="background:var(--run-expert)"></i>专家</span>
+        <span><i style="background:repeating-linear-gradient(90deg,var(--muted) 0 4px,transparent 4px 7px)"></i>关闭 / 缆车</span>
+        <span><i style="background:var(--route)"></i>规划路线</span>
+        <span>● 当前位置（圈 = 定位误差）</span>
+        <span style="color:#f97316">○ 模拟的真实位置</span>
+        <span style="color:#f59e0b">◯ 下一个岔口</span>
+      </div>
+      <p class="muted" id="mapNote"></p>
+    </section>
+
+    <details class="card" id="debug">
+      <summary>调试数据（状态机 / 匹配 / 播报日志 / 数据来源）</summary>
+      <dl class="kv" id="dbgKv"></dl>
+      <h2 style="margin-top:12px">播报日志</h2>
+      <div class="tbl-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>触发原因</th></tr></thead><tbody id="logBody"></tbody></table></div>
+      <h2 style="margin-top:12px">路线上各段的数据来源</h2>
+      <div class="tbl-wrap"><table><thead><tr><th>路段</th><th>难度</th><th>开放</th><th>平路</th><th>方向</th><th>几何</th></tr></thead><tbody id="attrBody"></tbody></table></div>
+      <h2 style="margin-top:12px">地图文件</h2>
+      <dl class="kv" id="dataKv"></dl>
+    </details>
+  </div>
+</div>
+
+<script type="module" src="nav/app.js"></script>
+</body>
+</html>
