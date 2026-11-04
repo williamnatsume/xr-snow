@@ -210,6 +210,7 @@ final class NavSession {
 
     func info() -> ResortInfo? { decode(ResortInfo.self, call("info")) }
     func setLang(_ lang: String) { value.invokeMethod("setLang", withArguments: [lang]) }
+    func setTalkLang(_ lang: String) { value.invokeMethod("setTalkLang", withArguments: [lang]) }
 
     func plan(start: String, goal: String, prefsJSON: String) -> PlanResult {
         decode(PlanResult.self, call("plan", [start, goal, prefsJSON]))

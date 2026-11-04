@@ -28,7 +28,10 @@ final class NavModel {
     // 设置（存在 UserDefaults）
     var resortId: String { didSet { if resortId != oldValue { save(); loadResort() } } }
     var simStartNode: String { didSet { save(); configureSession() } }
+    // 导航播报语言（神乐自动用日语，因为雪道名是假名）
     var lang: String { didSet { save(); session?.setLang(lang) } }
+    // 用户说话、雪人回话的语言（语音识别用这个），和播报语言分开
+    var talkLang: String { didSet { save(); session?.setTalkLang(talkLang); Task { await restartListening() } } }
     var voiceOn: Bool { didSet { save(); speech.enabled = voiceOn; if !voiceOn { speech.stop() } } }
     var wakeWordOn: Bool { didSet { save(); Task { await updateListening() } } }
     var mode: Mode { didSet { save(); configureSession(); updateLocation() } }
@@ -85,6 +88,7 @@ final class NavModel {
         resortId = d.string(forKey: "resortId") ?? "demo-fictional"
         simStartNode = d.string(forKey: "simStartNode") ?? "S"
         lang = d.string(forKey: "lang") ?? "zh"
+        talkLang = d.string(forKey: "talkLang") ?? "zh"
         voiceOn = d.object(forKey: "voiceOn") as? Bool ?? true
         wakeWordOn = d.object(forKey: "wakeWordOn") as? Bool ?? true
         mode = Mode(rawValue: d.string(forKey: "mode") ?? "") ?? .sim
@@ -100,6 +104,7 @@ final class NavModel {
         speech.onSpeaking = { [weak self] on in self?.input.mute(on) }
         input.onPartial = { [weak self] t in self?.onPartial(t) }
         input.isComplete = { [weak self] t in self?.looksComplete(t) ?? false }
+        input.shouldKeep = { [weak self] t in self?.shouldKeep(t) ?? false }
         input.onUtterance = { [weak self] t in self?.heard(t) }
         input.onStatus = { [weak self] s in self?.status = s; NSLog("[语音状态] %@", s) }
         NotificationCenter.default.addObserver(forName: .xueRenListen, object: nil, queue: .main) { [weak self] _ in
@@ -128,7 +133,7 @@ final class NavModel {
 
     private func save() {
         let d = UserDefaults.standard
-        d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang")
+        d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang"); d.set(talkLang, forKey: "talkLang")
         d.set(voiceOn, forKey: "voiceOn"); d.set(wakeWordOn, forKey: "wakeWordOn"); d.set(mode.rawValue, forKey: "mode")
         d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav")
     }
@@ -145,6 +150,7 @@ final class NavModel {
             // 神乐的雪道名是日文，中文语音读不出假名
             lang = resortId == "demo-fictional" ? "zh" : "ja"
             s.setLang(lang)
+            s.setTalkLang(talkLang)
             configureSession()
             updateLocation()
             history = []
@@ -190,7 +196,7 @@ final class NavModel {
         let want = wakeWordOn || Date() < commandWindowUntil
         if want && !input.running {
             speech.configure(listening: true)
-            await input.start(lang: lang)
+            await input.start(lang: talkLang)
             listening = input.running
         } else if !want && input.running {
             await input.stop()
@@ -205,6 +211,7 @@ final class NavModel {
         partial = text
         guard let session, !wakeAcked, session.hasWake(text) else { return }
         wakeAcked = true
+        input.markCommandStart()
         openCommandWindow(seconds: 10)
         Haptics.tap()
         Chime.play()
@@ -224,6 +231,16 @@ final class NavModel {
         if cmd.isEmpty { return false }
         let intent = session.understandLocal(cmd)
         return !intent.contains("\"intent\":\"unknown\"")
+    }
+
+    private func restartListening() async {
+        if input.running { await input.stop(); listening = false }
+        await updateListening()
+    }
+
+    // 只需要保留可能是命令的文字：喊过“雪人”，或者正在等用户说话
+    private func shouldKeep(_ text: String) -> Bool {
+        Date() < commandWindowUntil || (session?.hasWake(text) ?? false)
     }
 
     private func heard(_ text: String) {
@@ -346,7 +363,7 @@ final class NavModel {
 
     private func reply(_ text: String, note: String? = nil) {
         chat.append(ChatLine(who: .xueren, text: text, note: note))
-        speech.speak(text, lang: lang)
+        speech.speak(text, lang: talkLang)
     }
 
     // MARK: - 导航

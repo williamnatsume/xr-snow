@@ -14,6 +14,13 @@ final class SpeechInput {
     var onStatus: ((String) -> Void)?
     // 这句话是否已经是完整的命令（能马上处理）。是 → 停顿 0.6 秒就算说完；否 → 等 1.4 秒
     var isComplete: ((String) -> Bool)?
+    // 这段文字值不值得留着（喊过雪人 / 正在等命令）。不值得的整句话说完就丢掉，
+    // 免得旁边的电视、别人说话一直堆在缓冲里，把用户的命令淹没
+    var shouldKeep: ((String) -> Bool)?
+    private var commandStart: Date?
+
+    // 刚听到“雪人”：从这里开始最多再听 7 秒（旁边一直有人说话时也能结束）
+    func markCommandStart() { commandStart = Date() }
     private(set) var running = false
 
     private let engine = AVAudioEngine()
@@ -143,9 +150,15 @@ final class SpeechInput {
     }
 
     private func handle(text: String, isFinal: Bool) {
-        NSLog("[语音] %@%@%@", isFinal ? "完整：" : "片段：", text, muted || Date() < mutedUntil ? "（播报中，忽略）" : "")
         if muted || Date() < mutedUntil { return }
-        if isFinal { finalized += text; volatile = "" } else { volatile = text }
+        if isFinal {
+            let keep = shouldKeep?(finalized + text) ?? true
+            finalized = keep ? finalized + text : ""
+            volatile = ""
+            if keep { NSLog("[语音] 完整：%@", finalized) }
+        } else {
+            volatile = text
+        }
         lastChange = Date()
         let all = (finalized + volatile).trimmingCharacters(in: .whitespaces)
         if !all.isEmpty { onPartial?(all) }
@@ -157,9 +170,13 @@ final class SpeechInput {
         guard !all.isEmpty else { return }
         let quiet = Date().timeIntervalSince(lastChange)
         let need = (isComplete?(all) ?? false) ? 0.6 : 1.4
-        guard quiet > need else { return }
+        let tooLong = commandStart.map { Date().timeIntervalSince($0) > 7 } ?? false
+        guard quiet > need || tooLong else { return }
+        // 没喊雪人也不在等命令的话（旁边的人声），不交给上层，省得刷屏
+        if !(shouldKeep?(all) ?? true) { finalized = ""; volatile = ""; return }
         finalized = ""; volatile = ""
-        NSLog("[语音] 一句话（停顿 %.1f 秒后）：%@", quiet, all)
+        commandStart = nil
+        NSLog("[语音] 一句话（停顿 %.1f 秒%@）：%@", quiet, tooLong ? "，超过 7 秒强制结束" : "", all)
         onUtterance?(all)
     }
 }

@@ -1996,7 +1996,7 @@ var XRNav = (() => {
   }
   function createSession(resortJsonText) {
     const resort = loadResort(JSON.parse(resortJsonText));
-    let lang = "zh", plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
+    let lang = "zh", talkLang = "zh", plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
     let queue = [], lastSpoken = null;
     let mode = "sim", lastFix = null, defaultStart = null, simSeed = null;
     const places = () => {
@@ -2044,7 +2044,7 @@ var XRNav = (() => {
     const isNavigating = () => !!nav && nav.state !== "idle";
     const companion = createCompanion({
       resort,
-      lang: () => lang,
+      lang: () => talkLang,
       usesGps: () => mode === "gps",
       lastFix: () => lastFix,
       defaultStart: () => defaultStart || places()[0]?.node || null,
@@ -2087,9 +2087,13 @@ var XRNav = (() => {
           places: resort.errors.length ? [] : places()
         });
       },
+      // lang：导航播报语言（神乐用日语，因为雪道名是假名）；talkLang：用户说话和雪人回话的语言
       setLang(l) {
         lang = l === "ja" ? "ja" : "zh";
         if (nav) nav.lang = lang;
+      },
+      setTalkLang(l) {
+        talkLang = l === "ja" ? "ja" : "zh";
       },
       // prefsJson：{ maxDifficulty, avoidFlat, preferShort }
       plan(startNode, goalNode, prefsJson) {
@@ -2139,7 +2143,7 @@ var XRNav = (() => {
       },
       // 云端“雪人”：人设系统提示 + 工具定义；工具由原生层转调 tool()
       companionPrompt() {
-        return J({ system: companionSystemPrompt(resort, lang), tools: COMPANION_TOOLS });
+        return J({ system: companionSystemPrompt(resort, talkLang), tools: COMPANION_TOOLS });
       },
       tool(name, argsJson, nowMs) {
         if (nowMs != null) lastNow = nowMs;
@@ -2156,7 +2160,7 @@ var XRNav = (() => {
       },
       // 给云端大模型的系统提示和输出格式
       brainPrompt() {
-        return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA });
+        return J({ system: brainSystemPrompt(resort, talkLang), schema: INTENT_SCHEMA });
       },
       // 执行意图（来自云端或本地规则），返回 { say, mode, awaiting?, event? }
       converse(intentJson, nowMs) {
