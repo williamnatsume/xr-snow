@@ -148,6 +148,17 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
   - 旧版语音识别 SFSpeechRecognizer：zh-CN 仅联网，ja-JP 可离线
   - 新版 SpeechTranscriber（iOS 26+）：zh-CN、ja-JP 模型**都已安装，可离线转写** → 语音输入用这个
 
+#### 已实现（2026-11-04）
+- **对话层（JS，可测试）** `nav/companion.js`：统一意图结构 `INTENT_SCHEMA`（navigate / confirm / cancel / stop / pause / resume / distance / repeat / easier / where / chat / unknown）；本地规则 `rulesIntent`；地名解析 `resolvePlace`（歧义追问、不在图上就说找不到）；对话流程：说目的地 → 复述路线（起终点、难度、距离、时间、经过的雪道）并问“要出发吗” → 确认后开始导航；导航中可问距离、重复、换更简单的路线（从当前雪道向前重规划，没有就如实说明）、我在哪、暂停 / 继续 / 结束。条件只在规划成功后才记住。`brainSystemPrompt` 给云端用。`tests/companion.test.mjs` 12 项。
+- **iOS**：
+  - `SpeechInput.swift`：SpeechAnalyzer + SpeechTranscriber 离线识别（iOS 26+，所以部署目标改为 iOS 26），停顿 1.2 s 算一句。用 iPhone 自带麦克风（不用 AirPods 通话麦克风）。**模拟器上禁用**（访问麦克风会让模拟器音频系统超时崩溃，实测）。
+  - 唤醒：设置里“随时喊‘雪人’”（默认开，持续听，只理会带“雪人”的话）；大按钮 / Siri / 操作按钮（App Intent “和雪人说话”）打开 8 秒免唤醒窗口；雪人问“要出发吗？”后自动打开窗口等回答。播报时输入静音。
+  - `CloudBrain.swift`：Claude Messages API（原始 HTTP），`output_config.format` json_schema 结构化输出 + effort low，默认 `claude-opus-5-5`（`fallbacks: "default"`），可选 `claude-haiku-5-5`；10 s 超时；失败 / 没密钥 / 被拒绝 → 本地规则。密钥存钥匙串，用户在设置里粘贴。**云端路径未实测（开发机没有 API 密钥）。**
+  - `TrackRecorder.swift`：轨迹记录 + GPX 导出（格式同网页版 speed-hud，含 xrsnow:acc 误差）；“锁屏测试”模式：只定位记录，每 5 分钟语音报告点数 / 最长中断 / 电量，中断 >10 s 提醒、恢复时报中断秒数。真实 GPS 导航时默认也记录。
+  - 界面改为对话为主（`ContentView.swift`）：状态栏、导航卡片、对话气泡、大麦克风按钮、键盘输入；设置页放雪场、定位来源、说话、云端密钥、轨迹 / 锁屏测试、开发。
+  - 测试用启动参数：`-say "一句话"`（可多个，按顺序当作用户说的话）、`-selfcheck`。
+- **未验证**：真机上的语音识别准确度和唤醒；“一直在听”时播报会不会压低音乐（用了 `usesApplicationAudioSession = false`）；云端理解；锁屏测试本身（等用户户外测）。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。

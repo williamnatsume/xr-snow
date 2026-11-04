@@ -138,6 +138,7 @@ const T = {
     where: (edge) => `你现在大概在${edge}。`,
     whereUnknown: '暂时无法确定你在哪条雪道上。',
     easierNone: '已经是最简单的路线了。',
+    easierNoRoute: (diff, to) => `去${to}没有只走${diff}的路线，继续按原来的路线走。`,
     unknown: '我没听懂。你可以说：去山脚餐厅，不走高级道；或者：还有多远。',
     noRepeat: '还没有可以重复的提示。',
     km: (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}公里` : `${Math.round(m / 10) * 10}米`),
@@ -164,6 +165,7 @@ const T = {
     where: (edge) => `今はおそらく${edge}にいます。`,
     whereUnknown: '今どのコースにいるか特定できません。',
     easierNone: 'すでに一番やさしいルートです。',
+    easierNoRoute: (diff, to) => `${to}まで${diff}だけのルートはありません。今のルートを続けます。`,
     unknown: 'よくわかりませんでした。「山麓レストランへ、上級コースなし」や「あとどれくらい」と言ってください。',
     noRepeat: 'まだ繰り返す案内がありません。',
     km: (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}キロ` : `${Math.round(m / 10) * 10}メートル`),
@@ -319,8 +321,14 @@ export function createCompanion(api) {
         if (cur <= 1) return say(L.easierNone);
         const goal = pending?.goal || api.navGoal();
         if (!goal) { prefs.maxDifficulty = cur - 1; return say(L.noDest(placeExamples())); }
+        const hadPending = !!pending;
         pending = pending || { goal };
-        return planAndConfirm({ ...EMPTY, intent: 'navigate', maxDifficulty: cur - 1 });
+        const r = planAndConfirm({ ...EMPTY, intent: 'navigate', maxDifficulty: cur - 1 });
+        if (r.mode !== 'confirming') {
+          if (!hadPending) pending = null;
+          return say(L.easierNoRoute((api.lang() === 'ja' ? DIFF_JA : DIFF_ZH)[cur - 1], placeName(goal)));
+        }
+        return r;
       }
       case 'chat':
         return say((it.reply || '').slice(0, 120) || L.unknown);

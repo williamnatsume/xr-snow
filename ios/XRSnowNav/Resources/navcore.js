@@ -1586,6 +1586,7 @@ var XRNav = (() => {
       where: (edge) => `\u4F60\u73B0\u5728\u5927\u6982\u5728${edge}\u3002`,
       whereUnknown: "\u6682\u65F6\u65E0\u6CD5\u786E\u5B9A\u4F60\u5728\u54EA\u6761\u96EA\u9053\u4E0A\u3002",
       easierNone: "\u5DF2\u7ECF\u662F\u6700\u7B80\u5355\u7684\u8DEF\u7EBF\u4E86\u3002",
+      easierNoRoute: (diff, to) => `\u53BB${to}\u6CA1\u6709\u53EA\u8D70${diff}\u7684\u8DEF\u7EBF\uFF0C\u7EE7\u7EED\u6309\u539F\u6765\u7684\u8DEF\u7EBF\u8D70\u3002`,
       unknown: "\u6211\u6CA1\u542C\u61C2\u3002\u4F60\u53EF\u4EE5\u8BF4\uFF1A\u53BB\u5C71\u811A\u9910\u5385\uFF0C\u4E0D\u8D70\u9AD8\u7EA7\u9053\uFF1B\u6216\u8005\uFF1A\u8FD8\u6709\u591A\u8FDC\u3002",
       noRepeat: "\u8FD8\u6CA1\u6709\u53EF\u4EE5\u91CD\u590D\u7684\u63D0\u793A\u3002",
       km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u516C\u91CC` : `${Math.round(m / 10) * 10}\u7C73`,
@@ -1611,6 +1612,7 @@ var XRNav = (() => {
       where: (edge) => `\u4ECA\u306F\u304A\u305D\u3089\u304F${edge}\u306B\u3044\u307E\u3059\u3002`,
       whereUnknown: "\u4ECA\u3069\u306E\u30B3\u30FC\u30B9\u306B\u3044\u308B\u304B\u7279\u5B9A\u3067\u304D\u307E\u305B\u3093\u3002",
       easierNone: "\u3059\u3067\u306B\u4E00\u756A\u3084\u3055\u3057\u3044\u30EB\u30FC\u30C8\u3067\u3059\u3002",
+      easierNoRoute: (diff, to) => `${to}\u307E\u3067${diff}\u3060\u3051\u306E\u30EB\u30FC\u30C8\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u4ECA\u306E\u30EB\u30FC\u30C8\u3092\u7D9A\u3051\u307E\u3059\u3002`,
       unknown: "\u3088\u304F\u308F\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u300C\u5C71\u9E93\u30EC\u30B9\u30C8\u30E9\u30F3\u3078\u3001\u4E0A\u7D1A\u30B3\u30FC\u30B9\u306A\u3057\u300D\u3084\u300C\u3042\u3068\u3069\u308C\u304F\u3089\u3044\u300D\u3068\u8A00\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
       noRepeat: "\u307E\u3060\u7E70\u308A\u8FD4\u3059\u6848\u5185\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u30AD\u30ED` : `${Math.round(m / 10) * 10}\u30E1\u30FC\u30C8\u30EB`,
@@ -1773,8 +1775,14 @@ var XRNav = (() => {
             prefs.maxDifficulty = cur - 1;
             return say(L.noDest(placeExamples()));
           }
+          const hadPending = !!pending;
           pending = pending || { goal };
-          return planAndConfirm({ ...EMPTY, intent: "navigate", maxDifficulty: cur - 1 });
+          const r = planAndConfirm({ ...EMPTY, intent: "navigate", maxDifficulty: cur - 1 });
+          if (r.mode !== "confirming") {
+            if (!hadPending) pending = null;
+            return say(L.easierNoRoute((api.lang() === "ja" ? DIFF_JA : DIFF_ZH)[cur - 1], placeName(goal)));
+          }
+          return r;
         }
         case "chat":
           return say((it.reply || "").slice(0, 120) || L.unknown);

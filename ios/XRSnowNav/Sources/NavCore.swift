@@ -65,6 +65,13 @@ struct NavSnapshot: Decodable {
     let simT: Double?
 }
 
+struct ConverseResult: Decodable {
+    let say: String
+    let mode: String
+    let awaiting: Bool?
+    let event: String?
+}
+
 struct SimStepResult: Decodable {
     let done: Bool
     let simDone: Bool?
@@ -227,6 +234,23 @@ final class NavSession {
     func pause(nowMs: Double) { value.invokeMethod("pause", withArguments: [nowMs]) }
     func resume(nowMs: Double) { value.invokeMethod("resume", withArguments: [nowMs]) }
     func stop(nowMs: Double) { value.invokeMethod("stop", withArguments: [nowMs]) }
+
+    // 对话（nav/companion.js）
+    func configure(mode: String, startNode: String?, seed: Int) {
+        value.invokeMethod("configure", withArguments: [mode, startNode ?? NSNull(), seed])
+    }
+    func understandLocal(_ text: String) -> String { call("understandLocal", [text]) ?? "{\"intent\":\"unknown\"}" }
+    func stripWake(_ text: String) -> String { call("stripWake", [text]) ?? text }
+    func converse(intentJSON: String, nowMs: Double) -> ConverseResult {
+        decode(ConverseResult.self, call("converse", [intentJSON, nowMs])) ?? ConverseResult(say: "导航核心出错", mode: "idle", awaiting: nil, event: nil)
+    }
+    // 云端大模型的系统提示和输出格式
+    func brainPrompt() -> (system: String, schema: Any)? {
+        guard let json = call("brainPrompt"), let d = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let sys = obj["system"] as? String, let schema = obj["schema"] else { return nil }
+        return (sys, schema)
+    }
 
     func drainSpeech() -> [SpeechItem] { decode([SpeechItem].self, call("drainSpeech")) ?? [] }
     func replayText(nowMs: Double) -> String? { decode(String?.self, call("replayText", [nowMs])) ?? nil }

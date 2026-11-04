@@ -125,6 +125,16 @@ test('真实 GPS 模式：不知道位置时要求说出发地；虚构雪场不
   assert.match(c.say, /不允许真实 GPS/);
 });
 
+test('对话：没有更简单的路线时用一句话说明，继续原路线', () => {
+  const { talk, run } = session();
+  talk('去山脚餐厅，不走高级道');
+  talk('好');
+  run(20);
+  const e = talk('换条简单点的');
+  assert.equal(e.mode, 'navigating');
+  assert.equal(e.say, '去山脚餐厅没有只走初级的路线，继续按原来的路线走。');
+});
+
 test('云端提示：包含地点表，说明不由模型决定路线', () => {
   const p = brainSystemPrompt(R, 'zh');
   assert.ok(p.includes('山脚餐厅'));
