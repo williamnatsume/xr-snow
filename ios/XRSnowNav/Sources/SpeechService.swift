@@ -10,7 +10,7 @@ import AVFoundation
 final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
     private let synth = AVSpeechSynthesizer()
     var enabled = true
-    var onSpeaking: ((Bool) -> Void)?
+    var onSpeaking: ((Bool, Double) -> Void)?   // (是否在说, 预计时长秒)
     private(set) var listening = false
 
     override init() {
@@ -47,13 +47,26 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
             }
         }
         let u = AVSpeechUtterance(string: text)
-        u.voice = SpeechService.bestVoice(lang == "ja" ? "ja-JP" : "zh-CN")
+        u.voice = SpeechService.bestVoice(lang == "ja" ? "ja-JP" : lang == "en" ? "en-US" : "zh-CN")
         u.rate = AVSpeechUtteranceDefaultSpeechRate
-        onSpeaking?(true)
+        // 预计时长：中日文约 4.5 字/秒，英文约 14 字符/秒；多留 2 秒
+        let est = Double(text.count) / (lang == "en" ? 14 : 4.5) + 2
+        onSpeaking?(true, est)
         synth.speak(u)
     }
 
     func stop() { synth.stopSpeaking(at: .immediate) }
+
+    // 按文字判断用哪种语言的声音：有假名 → 日语；几乎全是英文字母 → 英语；否则用 fallback
+    static func languageOf(_ text: String, fallback: String) -> String {
+        let scalars = text.unicodeScalars
+        if scalars.contains(where: { (0x3040...0x30FF).contains($0.value) }) { return "ja" }
+        let letters = scalars.filter { CharacterSet.letters.contains($0) }
+        let latin = letters.filter { $0.isASCII }
+        if !letters.isEmpty && Double(latin.count) / Double(letters.count) > 0.8 { return "en" }
+        if fallback == "en" || fallback == "ja" { return letters.isEmpty ? fallback : "zh" }
+        return fallback
+    }
 
     // 选音质最好的声音：高级 > 增强 > 默认（高级/增强声音需在 设置 → 辅助功能 → 朗读内容 → 声音 里下载）
     private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
@@ -76,7 +89,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
     // 没有待播内容时：通知输入恢复；不在听时释放音频会话，让音乐恢复音量
     private func finished() {
         guard !synth.isSpeaking else { return }
-        onSpeaking?(false)
+        onSpeaking?(false, 0)
         if !listening {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }

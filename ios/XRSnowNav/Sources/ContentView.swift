@@ -242,7 +242,10 @@ struct SettingsView: View {
 
                 Section {
                     Picker("我说的语言", selection: $model.talkLang) {
-                        Text("中文").tag("zh"); Text("日本語").tag("ja")
+                        Text("中文").tag("zh"); Text("日本語").tag("ja"); Text("English").tag("en")
+                    }
+                    Picker("同时听的第二语言", selection: $model.secondLang) {
+                        Text("日本語").tag("ja"); Text("English").tag("en"); Text("中文").tag("zh")
                     }
                     Picker("导航播报语言", selection: $model.lang) {
                         Text("中文").tag("zh"); Text("日本語").tag("ja")
@@ -250,7 +253,7 @@ struct SettingsView: View {
                     Toggle("语音播报", isOn: $model.voiceOn)
                     Toggle("随时喊“雪人”唤醒", isOn: $model.wakeWordOn)
                 } header: { Text("说话") } footer: {
-                    Text("神乐的雪道名是日文假名，中文语音念不出来，所以神乐的转弯播报默认用日语；你说话和雪人回话仍然用中文。开着唤醒时 App 会一直用 iPhone 麦克风听（屏幕顶部有橙色点），更费电；大风时可能听不清。关掉后用大按钮、操作按钮或 Siri（“和雪人说话”）。")
+                    Text("iPhone 一次最多同时识别两种语言；雪人用你说话的语言回答。神乐的雪道名是日文假名，中文语音念不出来，所以神乐的转弯播报默认用日语；你说话和雪人回话仍然用中文。开着唤醒时 App 会一直用 iPhone 麦克风听（屏幕顶部有橙色点），更费电；大风时可能听不清。关掉后用大按钮、操作按钮或 Siri（“和雪人说话”）。")
                 }
 
                 Section {

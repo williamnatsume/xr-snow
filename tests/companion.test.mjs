@@ -30,6 +30,9 @@ test('唤醒词：去掉开头的“雪人”', () => {
   assert.equal(stripWake('雪人。'), '');
   assert.ok(hasWake('告诉我怎么走雪人。'));
   assert.ok(!hasWake('今天天气不错'));
+  assert.ok(hasWake('Hey snowman, how far is it'));
+  assert.equal(stripWake('Hey Snowman, how far is it?'), 'how far is it?');
+  assert.ok(hasWake('スノーマン、レストランまで'));
 });
 
 test('本地规则：常见说法', () => {
