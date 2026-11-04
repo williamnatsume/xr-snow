@@ -267,7 +267,7 @@ final class SpeechInput: NSObject {
         guard running, !text.isEmpty else { return }
         let u = AVSpeechUtterance(string: text)
         u.voice = voice
-        u.rate = AVSpeechUtteranceDefaultSpeechRate
+        SpeechService.tune(u)
         setSpeaking(true)
         pendingUtterances += 1
         let gen = speakGeneration

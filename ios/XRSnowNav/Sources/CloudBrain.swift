@@ -88,8 +88,12 @@ final class CloudBrain {
         }
     }
     // “雪人”对话：Claude 用人设说话，需要导航数据时调用工具（由 JS 导航核心执行）。
-    // 返回朗读用的回复；失败返回 nil（上层改用离线规则）。tool 闭包在主线程执行工具并返回 JSON 字符串。
+    // 流式：回复一边生成一边按句子交给 onSentence 朗读（第一句话更早出声）；
+    // 要调用工具（查路线等）又还没说过话时，先调 onToolStart（说一句“我看看”）。
+    // 返回完整的回复文字；失败返回 nil（上层改用离线规则）。
     func converse(text: String, context: String, history: [BrainTurn], system: String, tools: Any,
+                  onToolStart: @MainActor () -> Void = {},
+                  onSentence: @MainActor (String) -> Void = { _ in },
                   tool: @MainActor (String, String) -> String) async -> String? {
         guard let key = Keychain.read() else { return nil }
         var messages: [[String: Any]] = history.suffix(10).map { ["role": $0.role, "content": $0.text] }
@@ -103,21 +107,29 @@ final class CloudBrain {
         if messages.last?["role"] as? String == "user" { messages.removeLast() }
         messages.append(["role": "user", "content": "【当前状态】\(context)\n【用户说】\(text)"])
 
+        var spoken = ""
+        var saidFiller = false
+        let chunker = SentenceChunker()
         for _ in 0..<5 {
             var body: [String: Any] = [
                 "model": model.rawValue,
                 "max_tokens": 2048,
+                "stream": true,
                 "system": system + "\n\n这是实时语音对话，延迟敏感：尽快给出回复。",
                 "tools": tools,
                 "messages": messages,
                 "output_config": ["effort": "low"]
             ]
             if model.supportsFallback { body["fallbacks"] = "default" }
-            guard let obj = await post(body, key: key) else { return nil }
-            let stop = obj["stop_reason"] as? String
-            let content = obj["content"] as? [[String: Any]] ?? []
-            if stop == "refusal" { NSLog("[云端] 被拒绝"); return nil }
+            guard let msg = await postStream(body, key: key, onText: { piece in
+                for sentence in chunker.add(piece) { spoken += sentence; onSentence(sentence) }
+            }) else { return spoken.isEmpty ? nil : spoken }
+            for sentence in chunker.flush() { spoken += sentence; await onSentence(sentence) }
+            let stop = msg.stop
+            let content = msg.content
+            if stop == "refusal" { NSLog("[云端] 被拒绝"); return spoken.isEmpty ? nil : spoken }
             if stop == "tool_use" {
+                if spoken.isEmpty && !saidFiller { saidFiller = true; await onToolStart() }
                 // 助手消息原样带回（包括 thinking 块），再附上所有工具结果
                 messages.append(["role": "assistant", "content": content])
                 var results: [[String: Any]] = []
@@ -133,12 +145,88 @@ final class CloudBrain {
                 messages.append(["role": "user", "content": results])
                 continue
             }
-            let reply = content.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let reply = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
             return reply.isEmpty ? nil : reply
         }
         NSLog("[云端] 工具调用轮数过多")
         return nil
+    }
+
+    // 流式请求（SSE）：边收边把文字交给 onText，最后拼回完整的助手内容（工具调用要原样带回）
+    private func postStream(_ body: [String: Any], key: String,
+                            onText: @MainActor (String) -> Void) async -> (content: [[String: Any]], stop: String?)? {
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
+        req.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
+        if body["fallbacks"] != nil { req.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let t0 = Date()
+        var firstText: Date?
+        do {
+            let (bytes, resp) = try await session.bytes(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            guard status == 200 else {
+                var err = ""
+                for try await line in bytes.lines { err += line; if err.count > 400 { break } }
+                NSLog("[云端] HTTP %d：%@", status, err)
+                return nil
+            }
+            var blocks: [Int: [String: Any]] = [:]
+            var partialJSON: [Int: String] = [:]
+            var stop: String?
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data:") else { continue }
+                let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                guard let d = json.data(using: .utf8),
+                      let ev = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                      let type = ev["type"] as? String else { continue }
+                let index = ev["index"] as? Int ?? 0
+                switch type {
+                case "content_block_start":
+                    blocks[index] = ev["content_block"] as? [String: Any] ?? [:]
+                case "content_block_delta":
+                    guard let delta = ev["delta"] as? [String: Any] else { break }
+                    switch delta["type"] as? String {
+                    case "text_delta":
+                        let t = delta["text"] as? String ?? ""
+                        let old = blocks[index]?["text"] as? String ?? ""
+                        blocks[index]?["text"] = old + t
+                        if firstText == nil { firstText = Date() }
+                        await onText(t)
+                    case "thinking_delta":
+                        let old = blocks[index]?["thinking"] as? String ?? ""
+                        blocks[index]?["thinking"] = old + (delta["thinking"] as? String ?? "")
+                    case "signature_delta":
+                        blocks[index]?["signature"] = delta["signature"] as? String ?? ""
+                    case "input_json_delta":
+                        partialJSON[index, default: ""] += delta["partial_json"] as? String ?? ""
+                    default: break
+                    }
+                case "content_block_stop":
+                    if blocks[index]?["type"] as? String == "tool_use" {
+                        let raw = partialJSON[index] ?? ""
+                        let input = raw.isEmpty ? [String: Any]() :
+                            ((try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any] ?? [:])
+                        blocks[index]?["input"] = input
+                    }
+                case "message_delta":
+                    if let d = ev["delta"] as? [String: Any], let s = d["stop_reason"] as? String { stop = s }
+                case "error":
+                    NSLog("[云端] 流错误：%@", json)
+                    return nil
+                default: break
+                }
+            }
+            NSLog("[云端] 流式完成 %.1f 秒（第一个字 %@），结束原因 %@", Date().timeIntervalSince(t0),
+                  firstText.map { String(format: "%.1f 秒", $0.timeIntervalSince(t0)) } ?? "无文字", stop ?? "?")
+            let content = blocks.keys.sorted().compactMap { blocks[$0] }
+            return (content, stop)
+        } catch {
+            NSLog("[云端] 请求失败：%@", error.localizedDescription)
+            return nil
+        }
     }
 
     private func post(_ body: [String: Any], key: String) async -> [String: Any]? {
@@ -163,6 +251,37 @@ final class CloudBrain {
             NSLog("[云端] 请求失败：%@", error.localizedDescription)
             return nil
         }
+    }
+}
+
+// 把流式文字切成可以朗读的句子：遇到句末标点就切；太长时在逗号处切
+final class SentenceChunker {
+    private var buf = ""
+    private let ends: Set<Character> = ["。", "！", "？", "!", "?", "；", ";", "\n", "…"]
+    private let soft: Set<Character> = ["，", ",", "、"]
+
+    func add(_ piece: String) -> [String] {
+        buf += piece
+        var out: [String] = []
+        while let i = cutIndex() {
+            let s = String(buf[...i]).trimmingCharacters(in: .whitespacesAndNewlines)
+            buf = String(buf[buf.index(after: i)...])
+            if !s.isEmpty { out.append(s) }
+        }
+        return out
+    }
+
+    func flush() -> [String] {
+        let s = buf.trimmingCharacters(in: .whitespacesAndNewlines)
+        buf = ""
+        return s.isEmpty ? [] : [s]
+    }
+
+    private func cutIndex() -> String.Index? {
+        if let i = buf.firstIndex(where: { ends.contains($0) }) { return i }
+        // 很长还没有句号：在最后一个逗号处先说出去
+        if buf.count >= 18, let i = buf.lastIndex(where: { soft.contains($0) }) { return i }
+        return nil
     }
 }
 

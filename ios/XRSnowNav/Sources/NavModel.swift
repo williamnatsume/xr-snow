@@ -2,6 +2,7 @@
 // 也负责：定位（真实 GPS）、模拟器计时、轨迹记录 / 锁屏测试、唤醒词监听。
 
 import Foundation
+import AVFoundation
 import CoreLocation
 import Observation
 import UIKit
@@ -10,7 +11,7 @@ struct ChatLine: Identifiable {
     enum Who { case user, xueren, system }
     let id = UUID()
     let who: Who
-    let text: String
+    var text: String
     var note: String? = nil
 }
 
@@ -40,6 +41,8 @@ final class NavModel {
     var simSpeed: Double { didSet { save(); if simTimer != nil { startSimTimer() } } }
     var cloudModel: CloudModel { didSet { save(); brain.model = cloudModel } }
     var recordWhileNav: Bool { didSet { save() } }
+    // 雪人的中文声音（空 = 自动选音质最好的）
+    var voiceId: String { didSet { save(); SpeechService.preferredVoiceId["zh-CN"] = voiceId.isEmpty ? nil : voiceId } }
     var dataAck = false
 
     // 状态
@@ -100,6 +103,8 @@ final class NavModel {
         simSpeed = d.object(forKey: "simSpeed") as? Double ?? 1
         cloudModel = CloudModel(rawValue: d.string(forKey: "cloudModel2") ?? "") ?? .haiku
         recordWhileNav = d.object(forKey: "recordWhileNav") as? Bool ?? true
+        voiceId = d.string(forKey: "voiceId") ?? ""
+        SpeechService.preferredVoiceId["zh-CN"] = voiceId.isEmpty ? nil : voiceId
 
         do { core = try NavCore() } catch { fatalError = error.localizedDescription; return }
         brain.model = cloudModel
@@ -141,7 +146,7 @@ final class NavModel {
         let d = UserDefaults.standard
         d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang"); d.set(talkLang, forKey: "talkLang"); d.set(secondLang, forKey: "secondLang")
         d.set(voiceOn, forKey: "voiceOn"); d.set(wakeWordOn, forKey: "wakeWordOn"); d.set(mode.rawValue, forKey: "mode")
-        d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav")
+        d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav"); d.set(voiceId, forKey: "voiceId")
     }
 
     func loadResort() {
@@ -254,6 +259,32 @@ final class NavModel {
         }
     }
 
+    // 设置里试听声音
+    func previewVoice() {
+        speakOut("嗨，我是雪人。今天雪不错，咱们去滑两趟吧！", lang: "zh")
+    }
+
+    // 可选的中文声音：(id, 显示名)，音质好的排前面
+    var zhVoices: [(String, String)] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "zh-CN" }
+            .sorted { $0.quality.rawValue > $1.quality.rawValue }
+            .map { v in
+                let q = v.quality == .premium ? "高级" : v.quality == .enhanced ? "增强" : "普通"
+                return (v.identifier, "\(v.name)（\(q)）")
+            }
+    }
+
+    // 查东西时先应的一声（换着说）
+    private func fillerLine() -> String {
+        let options: [String]
+        switch replyLang {
+        case "ja": options = ["ちょっと待ってね", "うん、調べるね", "見てみるね"]
+        case "en": options = ["Let me check.", "One sec.", "Hang on, checking."]
+        default: options = ["嗯，我看看", "好，我查一下", "等我一下，我看看路线"]
+        }
+        return options.randomElement()!
+    }
+
     private func stopTalking() {
         input.stopSpeaking()
         speech.stop()
@@ -326,9 +357,28 @@ final class NavModel {
         var via = "离线规则"
         cloudStartedNav = false
 
+        var streamed = false
         if brain.hasKey, let p = session.companionPrompt() {
             thinking = true
-            let reply = await brain.converse(text: text, context: contextLine(), history: history, system: p.system, tools: p.tools) { [weak self] name, args in
+            var lineIndex: Int?
+            let reply = await brain.converse(text: text, context: contextLine(), history: history, system: p.system, tools: p.tools,
+                onToolStart: { [weak self] in
+                    // 要查路线：先应一声，不让用户干等
+                    guard let self else { return }
+                    let f = self.fillerLine()
+                    self.rememberSpoken(f)
+                    self.speakOut(f, lang: self.replyLang)
+                },
+                onSentence: { [weak self] sentence in
+                    // 边生成边说：一句一句念出来，对话气泡跟着长
+                    guard let self else { return }
+                    streamed = true
+                    self.thinking = false
+                    self.rememberSpoken(sentence)
+                    self.speakOut(sentence, lang: SpeechService.languageOf(sentence, fallback: self.replyLang))
+                    if let i = lineIndex, i < self.chat.count { self.chat[i].text += sentence }
+                    else { self.chat.append(ChatLine(who: .xueren, text: sentence, note: "云端 \(self.cloudModel.short)")); lineIndex = self.chat.count - 1 }
+                }) { [weak self] name, args in
                 guard let self else { return "{}" }
                 let out = session.tool(name, argsJSON: args, nowMs: self.nowMs)
                 self.applyToolEvent(out)
@@ -355,7 +405,7 @@ final class NavModel {
 
         flushSpeech()
         NSLog("[计时] 理解+回复用了 %.2f 秒（%@）", Date().timeIntervalSince(t0), via)
-        if !say.isEmpty { reply(say, note: via) }
+        if !say.isEmpty && !streamed { reply(say, note: via) }
         // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了问题时更长）
         let speakSec = Double(say.count) / 4
         openCommandWindow(seconds: (awaiting ? 12 : 8) + speakSec)

@@ -3,6 +3,7 @@
 
 import Foundation
 import Speech
+import AVFoundation
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -41,6 +42,12 @@ enum DeviceCapabilities {
                 let i = installed.contains { $0.hasPrefix(id) }
                 lines.append("长时转写 \(id)：\(s ? (i ? "已安装" : "支持，需下载模型") : "不支持")")
             }
+        }
+        // 已安装的中文 / 日语声音（质量：1 默认 2 增强 3 高级）
+        for lang in ["zh-CN", "ja-JP"] {
+            let vs = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == lang }
+                .map { "\($0.name)(\($0.quality.rawValue))" }
+            lines.append("声音 \(lang)：\(vs.joined(separator: "、"))")
         }
         return lines
     }

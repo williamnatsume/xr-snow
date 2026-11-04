@@ -49,7 +49,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         }
         let u = AVSpeechUtterance(string: text)
         u.voice = SpeechService.bestVoice(lang == "ja" ? "ja-JP" : lang == "en" ? "en-US" : "zh-CN")
-        u.rate = AVSpeechUtteranceDefaultSpeechRate
+        SpeechService.tune(u)
         // 预计时长：中日文约 4.5 字/秒，英文约 14 字符/秒；多留 2 秒
         let est = Double(text.count) / (lang == "en" ? 14 : 4.5) + 2
         onSpeaking?(true, est)
@@ -69,9 +69,21 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         return fallback
     }
 
+    // 语速、语调：比默认稍快、稍高一点，句间停顿短一点，更像聊天而不是念稿
+    static func tune(_ u: AVSpeechUtterance) {
+        u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.06
+        u.pitchMultiplier = 1.05
+        u.preUtteranceDelay = 0
+        u.postUtteranceDelay = 0.05
+    }
+
+    // 用户在设置里选的声音（空 = 自动选音质最好的）
+    static var preferredVoiceId: [String: String] = [:]
+
     // 选音质最好的声音：高级 > 增强 > 默认（高级/增强声音需在 设置 → 辅助功能 → 朗读内容 → 声音 里下载）
     private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
     static func bestVoice(_ language: String) -> AVSpeechSynthesisVoice? {
+        if let id = preferredVoiceId[language], let v = AVSpeechSynthesisVoice(identifier: id) { return v }
         if let v = voiceCache[language] { return v }
         let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == language }
         let best = all.max { a, b in a.quality.rawValue < b.quality.rawValue } ?? AVSpeechSynthesisVoice(language: language)
