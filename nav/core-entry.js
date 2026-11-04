@@ -11,8 +11,9 @@ import { Navigator, STATE_ZH, UNRELIABLE_ZH } from './navigator.js';
 import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
+import { createCompanion, rulesIntent, brainSystemPrompt, INTENT_SCHEMA, stripWake, WAKE_WORDS } from './companion.js';
 
-export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH };
+export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH, createCompanion, rulesIntent, INTENT_SCHEMA, WAKE_WORDS };
 
 const J = (x) => JSON.stringify(x);
 
@@ -28,6 +29,7 @@ export function createSession(resortJsonText) {
   const resort = loadResort(JSON.parse(resortJsonText));
   let lang = 'zh', plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
   let queue = [], lastSpoken = null;
+  let mode = 'sim', lastFix = null, defaultStart = null, simSeed = null;
 
   const places = () => {
     // 可选地点：POI 优先，其余节点用节点名
@@ -48,6 +50,58 @@ export function createSession(resortJsonText) {
   const newNav = () => new Navigator(resort, {
     lang,
     onSpeak: (item) => { lastSpoken = item; queue.push({ text: item.text, reason: item.reason, voice: item.voice !== false, key: item.key, t: item.t }); }
+  });
+
+  let lastNow = 0;
+  const nowOf = () => (sim ? sim.t : lastNow);
+
+  // 开始导航（按钮和对话共用）
+  function startNav(p, destNode, pr, nowMs) {
+    if (mode === 'gps' && !resort.allowRealGps) return { ok: false, reason: '这个地图不允许真实 GPS 导航' };
+    queue = []; lastSpoken = null;
+    nav = newNav();
+    if (mode === 'sim') {
+      sim = new Simulator(resort, { seed: simSeed ?? 3, drift: 4, carve: true });
+      sim.setPath(p.edges);
+      sim.follow = (node) => (nav?.route || []).slice(nav.idx).find((e) => e.from === node) || null;
+      nav.start({ route: p, destNode, prefs: pr }, 0);
+    } else {
+      sim = null;
+      nav.start({ route: p, destNode, prefs: pr }, nowMs ?? lastNow);
+      if (lastFix) nav.onFix(lastFix);
+    }
+    plan = { ...p, destNode };
+    prefs = pr;
+    return { ok: true };
+  }
+
+  const isNavigating = () => !!nav && nav.state !== 'idle';
+  const companion = createCompanion({
+    resort,
+    lang: () => lang,
+    usesGps: () => mode === 'gps',
+    lastFix: () => lastFix,
+    defaultStart: () => defaultStart || places()[0]?.node || null,
+    isNavigating,
+    currentEdge: () => (nav ? (nav.matched?.edge || nav.route?.[nav.idx] || null) : null),
+    navPrefs: () => (nav ? nav.prefs : null),
+    navGoal: () => (nav ? nav.destNode : null),
+    edgeLabel,
+    plan: (q, pr) => planRoute(resort, q, pr),
+    startNav: (p, goal, pr) => startNav(p, goal, pr, lastNow),
+    stopNav: () => { nav?.stop(nowOf()); nav = null; sim = null; },
+    pause: () => nav?.pause(nowOf()),
+    resume: () => nav?.resume(nowOf()),
+    snapshot: () => {
+      const sn = nav.snapshot(nowOf());
+      sn.nextPreview = sn.next && sn.distToNext != null ? maneuverText(sn.next, 'preview', { lang, distance: sn.distToNext }) : null;
+      return sn;
+    },
+    replay: () => {
+      if (!nav) return lastSpoken?.text || null;
+      const s = nav.snapshot(nowOf());
+      return s.nextText || lastSpoken?.text || null;
+    }
   });
 
   return {
@@ -80,22 +134,31 @@ export function createSession(resortJsonText) {
     },
 
     // mode：'sim' 用内置模拟器（时间从 0 开始，每次 simStep 前进 1 秒）；'gps' 用真实定位
-    start(mode, nowMs, seed) {
+    start(m, nowMs, seed) {
       if (!plan) return J({ ok: false, reason: '请先规划路线' });
-      if (mode === 'gps' && !resort.allowRealGps) return J({ ok: false, reason: '这个地图不允许真实 GPS 导航' });
-      queue = []; lastSpoken = null;
-      nav = newNav();
-      if (mode === 'sim') {
-        sim = new Simulator(resort, { seed: seed ?? 3, drift: 4, carve: true });
-        sim.setPath(plan.edges);
-        sim.follow = (node) => (nav?.route || []).slice(nav.idx).find((e) => e.from === node) || null;
-        nav.start({ route: plan, destNode: plan.destNode, prefs }, 0);
-      } else {
-        sim = null;
-        nav.start({ route: plan, destNode: plan.destNode, prefs }, nowMs);
-      }
-      return J({ ok: true });
+      mode = m === 'gps' ? 'gps' : 'sim';
+      simSeed = seed;
+      return J(startNav(plan, plan.destNode, prefs, nowMs));
     },
+
+    // 对话用的设置：定位来源、模拟时的默认起点
+    configure(m, startNode, seed) { mode = m === 'gps' ? 'gps' : 'sim'; defaultStart = startNode || null; simSeed = seed ?? null; },
+
+    // 一句话 → 意图（本地规则）。返回意图 JSON
+    understandLocal(text) { return J(rulesIntent(text, resort)); },
+    stripWake(text) { return stripWake(text); },
+
+    // 给云端大模型的系统提示和输出格式
+    brainPrompt() { return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA }); },
+
+    // 执行意图（来自云端或本地规则），返回 { say, mode, awaiting?, event? }
+    converse(intentJson, nowMs) {
+      lastNow = nowMs;
+      let intent;
+      try { intent = JSON.parse(intentJson); } catch { intent = { intent: 'unknown' }; }
+      return J(companion.handle(intent));
+    },
+    companionMode() { return companion.mode; },
 
     simStep() {
       if (!nav || !sim) return J({ done: true });
@@ -110,16 +173,18 @@ export function createSession(resortJsonText) {
 
     // 真实定位（CoreLocation）：速度 < 0 或误差 > 50 m 时不使用设备速度，与网页版一致
     onLocation(tMs, lat, lon, acc, speed) {
-      if (!nav || !resort.proj) return;
+      if (!resort.proj) return;
       const { x, y } = resort.proj.toXY(lat, lon);
       const devSpeed = speed != null && !isNaN(speed) && speed >= 0 && acc <= 50 ? speed : null;
-      nav.onFix({ t: tMs, x, y, acc, speed: devSpeed, source: 'gps' });
+      lastNow = Math.max(lastNow, tMs);
+      lastFix = { t: tMs, x, y, acc, speed: devSpeed, source: 'gps' };
+      if (nav && !sim) nav.onFix(lastFix);
     },
 
-    tick(nowMs) { if (nav && !sim) nav.tick(nowMs); },
+    tick(nowMs) { lastNow = nowMs; if (nav && !sim) nav.tick(nowMs); },
     pause(nowMs) { nav?.pause(sim ? sim.t : nowMs); },
     resume(nowMs) { nav?.resume(sim ? sim.t : nowMs); },
-    stop(nowMs) { nav?.stop(sim ? sim.t : nowMs); nav = null; sim = null; },
+    stop(nowMs) { nav?.stop(sim ? sim.t : nowMs); nav = null; sim = null; companion.reset(); },
 
     drainSpeech() { const q = queue; queue = []; return J(q); },
 

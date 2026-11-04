@@ -22,16 +22,20 @@ var XRNav = (() => {
   var core_entry_exports = {};
   __export(core_entry_exports, {
     DEFAULT_PREFS: () => DEFAULT_PREFS,
+    INTENT_SCHEMA: () => INTENT_SCHEMA,
     Navigator: () => Navigator,
     STATE_ZH: () => STATE_ZH,
     Simulator: () => Simulator,
     UNRELIABLE_ZH: () => UNRELIABLE_ZH,
+    WAKE_WORDS: () => WAKE_WORDS,
     buildManeuvers: () => buildManeuvers,
+    createCompanion: () => createCompanion,
     createSession: () => createSession,
     loadResort: () => loadResort,
     maneuverText: () => maneuverText,
     parseRequest: () => parseRequest,
     planRoute: () => planRoute,
+    rulesIntent: () => rulesIntent,
     runScenario: () => runScenario,
     scenarioTexts: () => scenarioTexts
   });
@@ -1466,6 +1470,366 @@ var XRNav = (() => {
     return { plan, spoken, states, snaps, nav, simu, log: nav.log };
   }
 
+  // nav/companion.js
+  var INTENTS = ["navigate", "confirm", "cancel", "stop", "pause", "resume", "distance", "repeat", "easier", "where", "chat", "unknown"];
+  var INTENT_SCHEMA = {
+    type: "object",
+    additionalProperties: false,
+    required: ["intent", "destination", "start", "maxDifficulty", "avoidFlat", "preferShort", "reply"],
+    properties: {
+      intent: { type: "string", enum: INTENTS },
+      destination: { type: "string" },
+      start: { type: "string" },
+      maxDifficulty: { type: "integer", enum: [0, 1, 2, 3, 4] },
+      avoidFlat: { type: "string", enum: ["yes", "no", ""] },
+      preferShort: { type: "string", enum: ["yes", "no", ""] },
+      reply: { type: "string" }
+    }
+  };
+  var WAKE_WORDS = ["\u96EA\u4EBA", "\u96EA\u3060\u308B\u307E", "\u3086\u304D\u3060\u308B\u307E"];
+  var EMPTY = { intent: "unknown", destination: "", start: "", maxDifficulty: 0, avoidFlat: "", preferShort: "", reply: "" };
+  function stripWake(text) {
+    let t = (text || "").trim();
+    for (const w of WAKE_WORDS) {
+      const i = t.indexOf(w);
+      if (i >= 0 && i <= 3) {
+        t = t.slice(i + w.length);
+        break;
+      }
+    }
+    return t.replace(/^[\s，,。、！!？?呀啊喂嘿]+/, "").trim();
+  }
+  var RULES = [
+    // 顺序有意义：先匹配更具体的
+    ["stop", /(结束导航|停止导航|不导航了|关掉导航|退出导航|案内(を)?終了|ナビ(を)?終了)/],
+    ["pause", /(暂停|先停一下|等一下|一時停止)/],
+    ["resume", /(继续导航|恢复导航|继续吧|^继续|再開)/],
+    ["repeat", /(再说一遍|再说一次|重复|没听清|刚才说什么|もう一度|もう一回)/],
+    ["distance", /(多远|还有多少|还要多久|多长时间|还有几|距离|あとどれ|どのくらい|何メートル)/],
+    ["easier", /(简单点|简单一点|轻松|容易点|容易一点|累了|好累|太难|太陡|簡単|楽な)/],
+    ["where", /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/],
+    ["cancel", /^(不要|不用|取消|算了|不了|不去了|别去了|いいえ|やめ|キャンセル)/],
+    ["confirm", /^(好|好的|好啊|开始|出发|走吧|走|可以|行|对|是的|嗯|没问题|ok|okay|go|はい|お願い|スタート|行こう)/i]
+  ];
+  function rulesIntent(text, resort) {
+    const t = stripWake(text);
+    if (!t) return { ...EMPTY, intent: "unknown" };
+    const req = parseRequest(t, resort);
+    const hasPlace = !!(req.destination || req.ambiguous.length);
+    for (const [intent, re] of RULES) {
+      if (!re.test(t)) continue;
+      if ((intent === "confirm" || intent === "cancel") && hasPlace) break;
+      if (intent === "easier") return { ...EMPTY, intent, maxDifficulty: 0 };
+      return { ...EMPTY, intent };
+    }
+    if (hasPlace || req.maxDifficulty != null || req.avoidFlat || req.preferShort) {
+      const amb = req.ambiguous.length && !req.destination ? (req.ambiguous[0].match(/“(.+?)”/) || [])[1] || "" : "";
+      return {
+        ...EMPTY,
+        intent: "navigate",
+        destination: req.destination?.name || amb,
+        start: req.start?.name || "",
+        maxDifficulty: req.maxDifficulty ?? 0,
+        avoidFlat: req.avoidFlat ? "yes" : "",
+        preferShort: req.preferShort ? "yes" : ""
+      };
+    }
+    return { ...EMPTY, intent: "unknown" };
+  }
+  function resolvePlace(resort, text) {
+    const q = (text || "").replace(/\s+/g, "");
+    if (!q) return null;
+    const cands = [];
+    const add = (node, name, score) => {
+      const old = cands.find((c) => c.node === node);
+      if (!old) cands.push({ node, name, score });
+      else if (score > old.score) old.score = score;
+    };
+    for (const p of resort.pois) {
+      const names = [p.name, p.name_ja, ...p.aliases || []].filter(Boolean);
+      for (const n of names) {
+        if (n === q) add(p.node, p.name, 3);
+        else if (q.includes(n) && n.length >= 2) add(p.node, p.name, 2);
+        else if (n.includes(q) && q.length >= 2) add(p.node, p.name, 1);
+      }
+    }
+    for (const n of resort.nodes.values()) {
+      if (!n.name || resort.pois.some((p) => p.node === n.id)) continue;
+      if (n.name === q) add(n.id, n.name, 3);
+      else if (q.length >= 2 && (n.name.includes(q) || q.includes(n.name))) add(n.id, n.name, 1);
+    }
+    if (!cands.length) return null;
+    const best = Math.max(...cands.map((c) => c.score));
+    const top = cands.filter((c) => c.score === best);
+    if (top.length === 1) return top[0];
+    return { ambiguous: top.map((c) => c.name) };
+  }
+  var DIFF_ZH = { 1: "\u521D\u7EA7", 2: "\u4E2D\u7EA7", 3: "\u9AD8\u7EA7", 4: "\u4E13\u5BB6\u7EA7" };
+  var DIFF_JA = { 1: "\u521D\u7D1A", 2: "\u4E2D\u7D1A", 3: "\u4E0A\u7D1A", 4: "\u30A8\u30AD\u30B9\u30D1\u30FC\u30C8" };
+  var T = {
+    zh: {
+      noDest: (ex) => `\u8981\u53BB\u54EA\u91CC\uFF1F\u6BD4\u5982\uFF1A${ex}`,
+      notFound: (q, ex) => `\u5730\u56FE\u4E0A\u6CA1\u6709\u627E\u5230\u201C${q}\u201D\u3002\u53EF\u4EE5\u53BB\uFF1A${ex}`,
+      ambiguous: (list) => `\u4F60\u8BF4\u7684\u662F${list.join("\uFF0C\u8FD8\u662F")}\uFF1F`,
+      noStart: "\u6211\u8FD8\u4E0D\u77E5\u9053\u4F60\u73B0\u5728\u5728\u54EA\u3002\u8BF7\u8BF4\u4ECE\u54EA\u91CC\u51FA\u53D1\uFF0C\u6BD4\u5982\u201C\u4ECE\u5C71\u9876\u51FA\u53D1\u53BB\u9910\u5385\u201D\u3002",
+      summary: (from, to, diff, km, min, via, warn) => `\u4ECE${from}\u53BB${to}\uFF0C\u53EA\u8D70${diff}\u4EE5\u4E0B\uFF0C\u7EA6${km}\u516C\u91CC\u3001${min}\u5206\u949F${via ? `\uFF0C\u7ECF\u8FC7${via}` : ""}\u3002${warn}\u8981\u51FA\u53D1\u5417\uFF1F`,
+      noRoute: (reason, hint) => `${reason}${hint ? "\u3002" + hint : ""}`,
+      cancelled: "\u597D\u7684\uFF0C\u53D6\u6D88\u4E86\u3002",
+      nothingToConfirm: "\u73B0\u5728\u6CA1\u6709\u5F85\u786E\u8BA4\u7684\u8DEF\u7EBF\u3002\u544A\u8BC9\u6211\u60F3\u53BB\u54EA\u91CC\u5427\u3002",
+      stopped: "\u5DF2\u7ED3\u675F\u5BFC\u822A\u3002",
+      notNavigating: "\u73B0\u5728\u6CA1\u6709\u5728\u5BFC\u822A\u3002",
+      paused: "\u5DF2\u6682\u505C\u5BFC\u822A\u3002\u8BF4\u201C\u7EE7\u7EED\u201D\u5C31\u6062\u590D\u3002",
+      resumed: "\u7EE7\u7EED\u5BFC\u822A\u3002",
+      unreliable: (why) => `${why}\uFF0C\u6682\u65F6\u65E0\u6CD5\u5224\u65AD\u8DDD\u79BB\u3002`,
+      distance: (d, next, rem) => `${next ? `${next}\u3002` : ""}${rem != null ? `\u5230\u76EE\u7684\u5730\u8FD8\u6709\u7EA6${rem}\u3002` : ""}`,
+      arrivedAlready: "\u5DF2\u7ECF\u5230\u8FBE\u76EE\u7684\u5730\u4E86\u3002",
+      where: (edge) => `\u4F60\u73B0\u5728\u5927\u6982\u5728${edge}\u3002`,
+      whereUnknown: "\u6682\u65F6\u65E0\u6CD5\u786E\u5B9A\u4F60\u5728\u54EA\u6761\u96EA\u9053\u4E0A\u3002",
+      easierNone: "\u5DF2\u7ECF\u662F\u6700\u7B80\u5355\u7684\u8DEF\u7EBF\u4E86\u3002",
+      unknown: "\u6211\u6CA1\u542C\u61C2\u3002\u4F60\u53EF\u4EE5\u8BF4\uFF1A\u53BB\u5C71\u811A\u9910\u5385\uFF0C\u4E0D\u8D70\u9AD8\u7EA7\u9053\uFF1B\u6216\u8005\uFF1A\u8FD8\u6709\u591A\u8FDC\u3002",
+      noRepeat: "\u8FD8\u6CA1\u6709\u53EF\u4EE5\u91CD\u590D\u7684\u63D0\u793A\u3002",
+      km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u516C\u91CC` : `${Math.round(m / 10) * 10}\u7C73`,
+      sep: "\u3001",
+      warnUnknownOpen: "\u6CE8\u610F\u5F00\u653E\u72B6\u6001\u672A\u77E5\u3002"
+    },
+    ja: {
+      noDest: (ex) => `\u3069\u3053\u3078\u884C\u304D\u307E\u3059\u304B\uFF1F\u4F8B\u3048\u3070\uFF1A${ex}`,
+      notFound: (q, ex) => `\u5730\u56F3\u306B\u300C${q}\u300D\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u884C\u3051\u308B\u5834\u6240\uFF1A${ex}`,
+      ambiguous: (list) => `${list.join("\u3068")}\u306E\u3069\u3061\u3089\u3067\u3059\u304B\uFF1F`,
+      noStart: "\u73FE\u5728\u5730\u304C\u307E\u3060\u308F\u304B\u308A\u307E\u305B\u3093\u3002\u300C\u5C71\u9802\u304B\u3089\u30EC\u30B9\u30C8\u30E9\u30F3\u3078\u300D\u306E\u3088\u3046\u306B\u51FA\u767A\u5730\u3092\u8A00\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+      summary: (from, to, diff, km, min, via, warn) => `${from}\u304B\u3089${to}\u307E\u3067\u3001${diff}\u4EE5\u4E0B\u306E\u30B3\u30FC\u30B9\u3067\u7D04${km}\u3001${min}\u5206\u3067\u3059${via ? `\u3002${via}\u3092\u901A\u308A\u307E\u3059` : ""}\u3002${warn}\u51FA\u767A\u3057\u307E\u3059\u304B\uFF1F`,
+      noRoute: (reason, hint) => `${reason}${hint ? "\u3002" + hint : ""}`,
+      cancelled: "\u308F\u304B\u308A\u307E\u3057\u305F\u3001\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3059\u3002",
+      nothingToConfirm: "\u78BA\u8A8D\u5F85\u3061\u306E\u30EB\u30FC\u30C8\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u884C\u304D\u5148\u3092\u6559\u3048\u3066\u304F\u3060\u3055\u3044\u3002",
+      stopped: "\u6848\u5185\u3092\u7D42\u4E86\u3057\u307E\u3057\u305F\u3002",
+      notNavigating: "\u4ECA\u306F\u6848\u5185\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+      paused: "\u6848\u5185\u3092\u4E00\u6642\u505C\u6B62\u3057\u307E\u3057\u305F\u3002\u300C\u518D\u958B\u300D\u3067\u623B\u308A\u307E\u3059\u3002",
+      resumed: "\u6848\u5185\u3092\u518D\u958B\u3057\u307E\u3059\u3002",
+      unreliable: (why) => `${why}\u306E\u305F\u3081\u3001\u8DDD\u96E2\u304C\u308F\u304B\u308A\u307E\u305B\u3093\u3002`,
+      distance: (d, next, rem) => `${next ? `${next}\u3002` : ""}${rem != null ? `\u76EE\u7684\u5730\u307E\u3067\u3042\u3068\u7D04${rem}\u3067\u3059\u3002` : ""}`,
+      arrivedAlready: "\u3082\u3046\u76EE\u7684\u5730\u306B\u7740\u3044\u3066\u3044\u307E\u3059\u3002",
+      where: (edge) => `\u4ECA\u306F\u304A\u305D\u3089\u304F${edge}\u306B\u3044\u307E\u3059\u3002`,
+      whereUnknown: "\u4ECA\u3069\u306E\u30B3\u30FC\u30B9\u306B\u3044\u308B\u304B\u7279\u5B9A\u3067\u304D\u307E\u305B\u3093\u3002",
+      easierNone: "\u3059\u3067\u306B\u4E00\u756A\u3084\u3055\u3057\u3044\u30EB\u30FC\u30C8\u3067\u3059\u3002",
+      unknown: "\u3088\u304F\u308F\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u300C\u5C71\u9E93\u30EC\u30B9\u30C8\u30E9\u30F3\u3078\u3001\u4E0A\u7D1A\u30B3\u30FC\u30B9\u306A\u3057\u300D\u3084\u300C\u3042\u3068\u3069\u308C\u304F\u3089\u3044\u300D\u3068\u8A00\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
+      noRepeat: "\u307E\u3060\u7E70\u308A\u8FD4\u3059\u6848\u5185\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
+      km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u30AD\u30ED` : `${Math.round(m / 10) * 10}\u30E1\u30FC\u30C8\u30EB`,
+      sep: "\u3001",
+      warnUnknownOpen: "\u55B6\u696D\u72B6\u6CC1\u306F\u4E0D\u660E\u3067\u3059\u3002"
+    }
+  };
+  function createCompanion(api) {
+    let mode = "idle";
+    let pending = null;
+    let prefs = { maxDifficulty: 2, avoidFlat: false, preferShort: false };
+    let lastReply = "";
+    const t = () => T[api.lang() === "ja" ? "ja" : "zh"];
+    const placeExamples = () => api.resort.pois.slice(0, 4).map((p) => api.lang() === "ja" && p.name_ja || p.name).join(t().sep);
+    const placeName = (node) => {
+      const p = api.resort.pois.find((x) => x.node === node);
+      if (p) return api.lang() === "ja" && p.name_ja || p.name;
+      return api.resort.nodes.get(node)?.name || node;
+    };
+    function locateStart() {
+      const fix = api.lastFix();
+      if (!fix) return null;
+      const cands = matchFix(api.resort, fix, { heading: null, moving: false, prevEdge: null });
+      const c = cands.find((x) => x.d <= Math.max(40, (fix.acc || 10) * 1.5));
+      if (c) return { startEdgeId: c.edge.id, label: api.edgeLabel(c.edge) };
+      let best = null;
+      for (const n of api.resort.nodes.values()) {
+        const d = Math.hypot(n.x - fix.x, n.y - fix.y);
+        if (d <= 150 && (!best || d < best.d)) best = { node: n.id, d };
+      }
+      return best ? { startNode: best.node, label: placeName(best.node) } : null;
+    }
+    function summarize2(p, fromLabel, goal) {
+      const L = t();
+      const diffName = (api.lang() === "ja" ? DIFF_JA : DIFF_ZH)[p.prefs.maxDifficulty] || "";
+      const runs = p.edges.filter((e) => e.type === "run" && e.ref).map((e) => api.lang() === "ja" ? `${e.ref}\u756A` : `${e.ref}\u53F7`);
+      const via = [...new Set(runs)].slice(0, 4).join(L.sep);
+      const km = api.lang() === "ja" ? L.km(p.length) : (p.length / 1e3).toFixed(1);
+      const warn = p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : "";
+      return L.summary(fromLabel, placeName(goal), diffName, km, Math.max(1, Math.round(p.time / 60)), via, warn);
+    }
+    function planAndConfirm(intent) {
+      const L = t();
+      const dest = resolvePlace(api.resort, intent.destination);
+      if (!intent.destination && !pending) return say(L.noDest(placeExamples()));
+      let goal = pending?.goal;
+      if (intent.destination) {
+        if (!dest) return say(L.notFound(intent.destination, placeExamples()));
+        if (dest.ambiguous) return say(L.ambiguous(dest.ambiguous));
+        goal = dest.node;
+      }
+      let start = null, fromLabel = "";
+      if (intent.start) {
+        const s = resolvePlace(api.resort, intent.start);
+        if (!s) return say(L.notFound(intent.start, placeExamples()));
+        if (s.ambiguous) return say(L.ambiguous(s.ambiguous));
+        start = { startNode: s.node };
+        fromLabel = placeName(s.node);
+      } else if (api.isNavigating() && api.currentEdge()) {
+        start = { startEdgeId: api.currentEdge().id };
+        fromLabel = api.edgeLabel(api.currentEdge());
+      } else if (api.usesGps()) {
+        const loc = locateStart();
+        if (!loc) return say(L.noStart);
+        start = loc;
+        fromLabel = loc.label;
+      } else {
+        const n = api.defaultStart();
+        if (!n) return say(L.noStart);
+        start = { startNode: n };
+        fromLabel = placeName(n);
+      }
+      const want = { ...prefs };
+      if (intent.maxDifficulty) want.maxDifficulty = intent.maxDifficulty;
+      if (intent.avoidFlat) want.avoidFlat = intent.avoidFlat === "yes";
+      if (intent.preferShort) want.preferShort = intent.preferShort === "yes";
+      const p = api.plan({ ...start, goalNode: goal }, want);
+      if (!p.ok) {
+        if (!api.isNavigating() && !intent.destination) pending = null;
+        mode = api.isNavigating() ? "navigating" : "idle";
+        return say(L.noRoute(p.reason, (p.hints || []).join("\uFF1B")));
+      }
+      prefs = want;
+      pending = { ...start, goal, prefs: { ...p.prefs }, plan: p };
+      mode = "confirming";
+      return say(summarize2(p, fromLabel, goal), { awaiting: true });
+    }
+    function say(text, extra = {}) {
+      if (text) lastReply = text;
+      return { say: text, mode, ...extra };
+    }
+    function handle(intent) {
+      const L = t();
+      const it = { ...EMPTY, ...intent || {} };
+      if (it.maxDifficulty && !(it.maxDifficulty >= 1 && it.maxDifficulty <= 4)) it.maxDifficulty = 0;
+      if (api.isNavigating() && mode !== "confirming") mode = "navigating";
+      if (!api.isNavigating() && mode === "navigating") mode = "idle";
+      switch (it.intent) {
+        case "navigate":
+          return planAndConfirm(it);
+        case "confirm": {
+          if (mode !== "confirming" || !pending) return say(L.nothingToConfirm);
+          const r = api.startNav(pending.plan, pending.goal, pending.prefs);
+          if (!r.ok) {
+            mode = "idle";
+            return say(r.reason);
+          }
+          mode = "navigating";
+          pending = null;
+          return say("", { event: "started" });
+        }
+        case "cancel":
+          if (mode === "confirming") {
+            pending = null;
+            mode = api.isNavigating() ? "navigating" : "idle";
+            return say(L.cancelled);
+          }
+          return say(L.cancelled);
+        case "stop":
+          pending = null;
+          if (!api.isNavigating()) {
+            mode = "idle";
+            return say(L.notNavigating);
+          }
+          api.stopNav();
+          mode = "idle";
+          return say(L.stopped, { event: "stopped" });
+        case "pause":
+          if (!api.isNavigating()) return say(L.notNavigating);
+          api.pause();
+          return say(L.paused, { event: "paused" });
+        case "resume":
+          if (!api.isNavigating()) return say(L.notNavigating);
+          api.resume();
+          return say(L.resumed, { event: "resumed" });
+        case "repeat": {
+          const r = api.replay() || lastReply;
+          return r ? { say: r, mode } : say(L.noRepeat);
+        }
+        case "distance": {
+          if (!api.isNavigating()) return say(L.notNavigating);
+          const s = api.snapshot();
+          if (s.state === "arrived") return say(L.arrivedAlready);
+          if (s.unreliable || s.stale) return say(L.unreliable(s.unreliable || ""));
+          const d = s.distToNext != null ? Math.round(s.distToNext / 10) * 10 : null;
+          const next = d != null && d > 60 && s.nextPreview ? s.nextPreview : s.nextText || "";
+          return say(L.distance(d, next, s.remaining != null ? L.km(s.remaining) : null));
+        }
+        case "where": {
+          const e = api.isNavigating() ? api.currentEdge() : null;
+          if (e) return say(L.where(api.edgeLabel(e)));
+          const loc = api.usesGps() ? locateStart() : null;
+          return say(loc ? L.where(loc.label) : L.whereUnknown);
+        }
+        case "easier": {
+          const cur = (pending?.prefs || api.navPrefs() || prefs).maxDifficulty || prefs.maxDifficulty;
+          if (cur <= 1) return say(L.easierNone);
+          const goal = pending?.goal || api.navGoal();
+          if (!goal) {
+            prefs.maxDifficulty = cur - 1;
+            return say(L.noDest(placeExamples()));
+          }
+          pending = pending || { goal };
+          return planAndConfirm({ ...EMPTY, intent: "navigate", maxDifficulty: cur - 1 });
+        }
+        case "chat":
+          return say((it.reply || "").slice(0, 120) || L.unknown);
+        default:
+          return say(L.unknown);
+      }
+    }
+    return {
+      handle,
+      get mode() {
+        return mode;
+      },
+      get pending() {
+        return pending;
+      },
+      get prefs() {
+        return { ...prefs };
+      },
+      setPrefs(p) {
+        prefs = { ...prefs, ...p };
+      },
+      reset() {
+        mode = "idle";
+        pending = null;
+      }
+    };
+  }
+  function brainSystemPrompt(resort, lang) {
+    const places = resort.pois.map((p) => {
+      const names = [p.name, p.name_ja, ...p.aliases || []].filter(Boolean);
+      return `- ${names.join(" / ")}`;
+    }).join("\n");
+    return [
+      "\u4F60\u662F\u201C\u96EA\u4EBA\u201D\uFF0C\u4E00\u4E2A\u6ED1\u96EA\u8BED\u97F3\u5BFC\u822A\u4F19\u4F34\u7684\u8BED\u8A00\u7406\u89E3\u6A21\u5757\u3002\u7528\u6237\u6234\u7740\u624B\u5957\u5728\u96EA\u9053\u4E0A\uFF0C\u7528\u4E2D\u6587\u6216\u65E5\u8BED\u5BF9\u624B\u673A\u8BF4\u8BDD\uFF08\u8BED\u97F3\u8BC6\u522B\u7ED3\u679C\u53EF\u80FD\u6709\u9519\u5B57\uFF09\u3002",
+      "\u4F60\u7684\u552F\u4E00\u4EFB\u52A1\uFF1A\u628A\u7528\u6237\u8FD9\u4E00\u53E5\u8BDD\u7406\u89E3\u6210\u4E00\u4E2A\u610F\u56FE JSON\u3002\u4F60\u4E0D\u89C4\u5212\u8DEF\u7EBF\u3001\u4E0D\u51B3\u5B9A\u8D70\u54EA\u6761\u96EA\u9053\u3001\u4E0D\u7ED9\u8F6C\u5F2F\u6307\u4EE4\u2014\u2014\u8FD9\u4E9B\u7531\u5BFC\u822A\u7A0B\u5E8F\u6839\u636E\u5730\u56FE\u5B8C\u6210\u3002",
+      "",
+      "\u610F\u56FE\uFF1A",
+      "- navigate\uFF1A\u60F3\u53BB\u67D0\u5730\uFF0C\u6216\u4FEE\u6539\u8DEF\u7EBF\u6761\u4EF6\uFF08\u96BE\u5EA6\u3001\u907F\u5F00\u5E73\u8DEF\u3001\u6700\u77ED\uFF09\u3002destination \u586B\u5730\u70B9\u8868\u91CC\u7684\u540D\u79F0\uFF08\u7528\u8868\u91CC\u5199\u6CD5\uFF09\uFF1B\u7528\u6237\u8BF4\u4E86\u51FA\u53D1\u5730\u624D\u586B start\u3002",
+      "- confirm\uFF1A\u540C\u610F/\u786E\u8BA4\u51FA\u53D1\uFF08\u597D\u3001\u8D70\u5427\u3001\u53EF\u4EE5\uFF09\u3002cancel\uFF1A\u4E0D\u8981\u3001\u7B97\u4E86\u3002",
+      "- stop\uFF1A\u7ED3\u675F\u5BFC\u822A\u3002pause / resume\uFF1A\u6682\u505C / \u7EE7\u7EED\u5BFC\u822A\u3002",
+      "- distance\uFF1A\u95EE\u8FD8\u6709\u591A\u8FDC/\u591A\u4E45\u3002repeat\uFF1A\u6CA1\u542C\u6E05\u3001\u518D\u8BF4\u4E00\u904D\u3002easier\uFF1A\u60F3\u8D70\u66F4\u7B80\u5355/\u8F7B\u677E\u7684\u8DEF\u3002where\uFF1A\u95EE\u81EA\u5DF1\u5728\u54EA\u3002",
+      "- chat\uFF1A\u95F2\u804A\u3001\u6253\u62DB\u547C\u3001\u60C5\u7EEA\u8868\u8FBE\u3001\u4E0E\u5BFC\u822A\u65E0\u5173\u7684\u95EE\u9898\u3002reply \u586B\u4E00\u53E5\u7B80\u77ED\u53CB\u597D\u7684\u56DE\u590D\uFF08\u4E0D\u8D85\u8FC7 40 \u5B57\uFF0C\u7528\u7528\u6237\u7684\u8BED\u8A00\uFF09\uFF0C\u4E0D\u8981\u7ED9\u4EFB\u4F55\u8DEF\u7EBF\u6216\u96EA\u9053\u5EFA\u8BAE\uFF0C\u4E0D\u8981\u7F16\u9020\u96EA\u573A\u4FE1\u606F\u3002",
+      "- unknown\uFF1A\u542C\u4E0D\u61C2\u6216\u8BED\u97F3\u8BC6\u522B\u660E\u663E\u9519\u4E71\u3002",
+      "",
+      "\u96BE\u5EA6 maxDifficulty\uFF1A1 \u521D\u7EA7\uFF08\u7EFF\uFF09\u30012 \u4E2D\u7EA7\uFF08\u7EA2\uFF09\u30013 \u9AD8\u7EA7\uFF08\u9ED1/\u4E0A\u7EA7\uFF09\u30014 \u4E13\u5BB6\uFF1B\u201C\u4E0D\u8D70\u9AD8\u7EA7\u9053\u201D= 2\uFF0C\u201C\u53EA\u8D70\u521D\u7EA7\u201D= 1\uFF0C\u6CA1\u63D0\u5230 = 0\u3002",
+      'avoidFlat\uFF1A\u6015\u5E73\u8DEF/\u4E0D\u60F3\u8E6C/\u4E0D\u60F3\u8D70\u8DEF = "yes"\uFF1BpreferShort\uFF1A\u8981\u6700\u77ED\u6700\u5FEB = "yes"\uFF1B\u6CA1\u63D0\u5230 = ""\u3002',
+      "\u4E0D\u9700\u8981\u7684\u5B57\u6BB5\u586B\u7A7A\u5B57\u7B26\u4E32\u6216 0\u3002\u53EA\u80FD\u7528\u4E0B\u9762\u5730\u70B9\u8868\u91CC\u7684\u5730\u70B9\uFF1B\u7528\u6237\u8BF4\u7684\u5730\u70B9\u4E0D\u5728\u8868\u91CC\u65F6\uFF0Cdestination \u539F\u6837\u586B\u7528\u6237\u7684\u8BF4\u6CD5\uFF08\u7A0B\u5E8F\u4F1A\u8FFD\u95EE\uFF09\u3002",
+      `\u5F53\u524D\u64AD\u62A5\u8BED\u8A00\uFF1A${lang === "ja" ? "\u65E5\u8BED" : "\u4E2D\u6587"}\u3002`,
+      "",
+      `\u96EA\u573A\uFF1A${resort.name}`,
+      "\u5730\u70B9\u8868\uFF1A",
+      places
+    ].join("\n");
+  }
+
   // nav/core-entry.js
   var J = (x) => JSON.stringify(x);
   function scenarioTexts(resortJsonText, opts) {
@@ -1478,6 +1842,7 @@ var XRNav = (() => {
     const resort = loadResort(JSON.parse(resortJsonText));
     let lang = "zh", plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
     let queue = [], lastSpoken = null;
+    let mode = "sim", lastFix = null, defaultStart = null, simSeed = null;
     const places = () => {
       const seen = /* @__PURE__ */ new Set(), list = [];
       for (const p of resort.pois || []) {
@@ -1497,6 +1862,59 @@ var XRNav = (() => {
       onSpeak: (item) => {
         lastSpoken = item;
         queue.push({ text: item.text, reason: item.reason, voice: item.voice !== false, key: item.key, t: item.t });
+      }
+    });
+    let lastNow = 0;
+    const nowOf = () => sim ? sim.t : lastNow;
+    function startNav(p, destNode, pr, nowMs) {
+      if (mode === "gps" && !resort.allowRealGps) return { ok: false, reason: "\u8FD9\u4E2A\u5730\u56FE\u4E0D\u5141\u8BB8\u771F\u5B9E GPS \u5BFC\u822A" };
+      queue = [];
+      lastSpoken = null;
+      nav = newNav();
+      if (mode === "sim") {
+        sim = new Simulator(resort, { seed: simSeed ?? 3, drift: 4, carve: true });
+        sim.setPath(p.edges);
+        sim.follow = (node) => (nav?.route || []).slice(nav.idx).find((e) => e.from === node) || null;
+        nav.start({ route: p, destNode, prefs: pr }, 0);
+      } else {
+        sim = null;
+        nav.start({ route: p, destNode, prefs: pr }, nowMs ?? lastNow);
+        if (lastFix) nav.onFix(lastFix);
+      }
+      plan = { ...p, destNode };
+      prefs = pr;
+      return { ok: true };
+    }
+    const isNavigating = () => !!nav && nav.state !== "idle";
+    const companion = createCompanion({
+      resort,
+      lang: () => lang,
+      usesGps: () => mode === "gps",
+      lastFix: () => lastFix,
+      defaultStart: () => defaultStart || places()[0]?.node || null,
+      isNavigating,
+      currentEdge: () => nav ? nav.matched?.edge || nav.route?.[nav.idx] || null : null,
+      navPrefs: () => nav ? nav.prefs : null,
+      navGoal: () => nav ? nav.destNode : null,
+      edgeLabel,
+      plan: (q, pr) => planRoute(resort, q, pr),
+      startNav: (p, goal, pr) => startNav(p, goal, pr, lastNow),
+      stopNav: () => {
+        nav?.stop(nowOf());
+        nav = null;
+        sim = null;
+      },
+      pause: () => nav?.pause(nowOf()),
+      resume: () => nav?.resume(nowOf()),
+      snapshot: () => {
+        const sn = nav.snapshot(nowOf());
+        sn.nextPreview = sn.next && sn.distToNext != null ? maneuverText(sn.next, "preview", { lang, distance: sn.distToNext }) : null;
+        return sn;
+      },
+      replay: () => {
+        if (!nav) return lastSpoken?.text || null;
+        const s = nav.snapshot(nowOf());
+        return s.nextText || lastSpoken?.text || null;
       }
     });
     return {
@@ -1538,22 +1956,42 @@ var XRNav = (() => {
         });
       },
       // mode：'sim' 用内置模拟器（时间从 0 开始，每次 simStep 前进 1 秒）；'gps' 用真实定位
-      start(mode, nowMs, seed) {
+      start(m, nowMs, seed) {
         if (!plan) return J({ ok: false, reason: "\u8BF7\u5148\u89C4\u5212\u8DEF\u7EBF" });
-        if (mode === "gps" && !resort.allowRealGps) return J({ ok: false, reason: "\u8FD9\u4E2A\u5730\u56FE\u4E0D\u5141\u8BB8\u771F\u5B9E GPS \u5BFC\u822A" });
-        queue = [];
-        lastSpoken = null;
-        nav = newNav();
-        if (mode === "sim") {
-          sim = new Simulator(resort, { seed: seed ?? 3, drift: 4, carve: true });
-          sim.setPath(plan.edges);
-          sim.follow = (node) => (nav?.route || []).slice(nav.idx).find((e) => e.from === node) || null;
-          nav.start({ route: plan, destNode: plan.destNode, prefs }, 0);
-        } else {
-          sim = null;
-          nav.start({ route: plan, destNode: plan.destNode, prefs }, nowMs);
+        mode = m === "gps" ? "gps" : "sim";
+        simSeed = seed;
+        return J(startNav(plan, plan.destNode, prefs, nowMs));
+      },
+      // 对话用的设置：定位来源、模拟时的默认起点
+      configure(m, startNode, seed) {
+        mode = m === "gps" ? "gps" : "sim";
+        defaultStart = startNode || null;
+        simSeed = seed ?? null;
+      },
+      // 一句话 → 意图（本地规则）。返回意图 JSON
+      understandLocal(text) {
+        return J(rulesIntent(text, resort));
+      },
+      stripWake(text) {
+        return stripWake(text);
+      },
+      // 给云端大模型的系统提示和输出格式
+      brainPrompt() {
+        return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA });
+      },
+      // 执行意图（来自云端或本地规则），返回 { say, mode, awaiting?, event? }
+      converse(intentJson, nowMs) {
+        lastNow = nowMs;
+        let intent;
+        try {
+          intent = JSON.parse(intentJson);
+        } catch {
+          intent = { intent: "unknown" };
         }
-        return J({ ok: true });
+        return J(companion.handle(intent));
+      },
+      companionMode() {
+        return companion.mode;
       },
       simStep() {
         if (!nav || !sim) return J({ done: true });
@@ -1570,12 +2008,15 @@ var XRNav = (() => {
       },
       // 真实定位（CoreLocation）：速度 < 0 或误差 > 50 m 时不使用设备速度，与网页版一致
       onLocation(tMs, lat, lon, acc, speed) {
-        if (!nav || !resort.proj) return;
+        if (!resort.proj) return;
         const { x, y } = resort.proj.toXY(lat, lon);
         const devSpeed = speed != null && !isNaN(speed) && speed >= 0 && acc <= 50 ? speed : null;
-        nav.onFix({ t: tMs, x, y, acc, speed: devSpeed, source: "gps" });
+        lastNow = Math.max(lastNow, tMs);
+        lastFix = { t: tMs, x, y, acc, speed: devSpeed, source: "gps" };
+        if (nav && !sim) nav.onFix(lastFix);
       },
       tick(nowMs) {
+        lastNow = nowMs;
         if (nav && !sim) nav.tick(nowMs);
       },
       pause(nowMs) {
@@ -1588,6 +2029,7 @@ var XRNav = (() => {
         nav?.stop(sim ? sim.t : nowMs);
         nav = null;
         sim = null;
+        companion.reset();
       },
       drainSpeech() {
         const q = queue;
