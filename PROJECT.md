@@ -159,6 +159,15 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
   - 测试用启动参数：`-say "一句话"`（可多个，按顺序当作用户说的话）、`-selfcheck`。
 - **未验证**：真机上的语音识别准确度和唤醒；“一直在听”时播报会不会压低音乐（用了 `usesApplicationAudioSession = false`）；云端理解；锁屏测试本身（等用户户外测）。
 
+#### 雪人 v2：陪滑 / 教练人设（2026-11-04）
+- 有 API 密钥时，**Claude 直接说话**：系统提示 `companionSystemPrompt`（陪滑伙伴 + 教练，回复会被朗读：口语、短、≤40 字；事实只来自工具），工具 `COMPANION_TOOLS`（plan_route / start_navigation / cancel_route / easier_route / control_navigation / get_status / repeat_instruction），由 `session.tool()` 在 JS 里执行（复用对话管理器，路线仍由规划器决定）。Swift 侧 `CloudBrain.converse` 做工具循环（最多 5 轮，助手内容原样带回）。
+- 默认模型改为 **claude-haiku-5-5**（延迟最低，每句约 0.05 日元）；可选 Sonnet 5.5 / Opus 5.5（UserDefaults 键 `cloudModel2`）。没有密钥 / 失败 → 离线规则（原来的模板回复）。
+- 到达目的地时总结这一趟（距离、用时、最高速度、今天第几趟），云端用人设说，离线用模板。云端开始导航时不再重复播“开始导航，前往…”。
+- 唤醒：识别片段里一出现“雪人”就轻震 + 短提示音（系统音 1113）；0.7 秒内没接着说才说“我在”。同音字（学人、血人等）也算。
+- 声音：自动选已安装的最高音质中文 / 日语声音（高级 / 增强声音要用户在系统设置里下载）。
+- 真机日志：背景里的音乐、电视会被识别成文字，但没有“雪人”就忽略（实测正常）。
+- 未实测：云端对话（开发机没有密钥）、新唤醒反馈。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。

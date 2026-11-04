@@ -11,7 +11,7 @@ import { Navigator, STATE_ZH, UNRELIABLE_ZH } from './navigator.js';
 import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
-import { createCompanion, rulesIntent, brainSystemPrompt, INTENT_SCHEMA, stripWake, hasWake, WAKE_WORDS } from './companion.js';
+import { createCompanion, rulesIntent, brainSystemPrompt, companionSystemPrompt, COMPANION_TOOLS, INTENT_SCHEMA, stripWake, hasWake, afterWake, WAKE_WORDS } from './companion.js';
 
 export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH, createCompanion, rulesIntent, INTENT_SCHEMA, WAKE_WORDS };
 
@@ -148,6 +148,17 @@ export function createSession(resortJsonText) {
     understandLocal(text) { return J(rulesIntent(text, resort)); },
     stripWake(text) { return stripWake(text); },
     hasWake(text) { return hasWake(text); },
+    afterWake(text) { return afterWake(text); },
+
+    // 云端“雪人”：人设系统提示 + 工具定义；工具由原生层转调 tool()
+    companionPrompt() { return J({ system: companionSystemPrompt(resort, lang), tools: COMPANION_TOOLS }); },
+    tool(name, argsJson, nowMs) {
+      if (nowMs != null) lastNow = nowMs;
+      let args = {};
+      try { args = JSON.parse(argsJson || '{}'); } catch { /* 空参数 */ }
+      return J(companion.tool(name, args));
+    },
+    status(nowMs) { if (nowMs != null) lastNow = nowMs; return J(companion.status()); },
 
     // 给云端大模型的系统提示和输出格式
     brainPrompt() { return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA }); },
@@ -207,7 +218,8 @@ export function createSession(resortJsonText) {
         acc: s.acc, speed: s.speed, ageMs: s.ageMs, stale: s.stale,
         nextText: s.nextText, distToNext: s.distToNext, remaining: s.remaining,
         edge: s.matched?.edge ? edgeLabel(s.matched.edge) : null,
-        simT: sim ? sim.t : null
+        simT: sim ? sim.t : null,
+        routeKm: s.route ? s.route.reduce((a, e) => a + e.length, 0) / 1000 : null
       });
     }
   };

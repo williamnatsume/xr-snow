@@ -1493,6 +1493,13 @@ var XRNav = (() => {
     WAKE_RE.lastIndex = 0;
     return WAKE_RE.test(text || "");
   }
+  function afterWake(text) {
+    const t = text || "";
+    WAKE_RE.lastIndex = 0;
+    let m, end = -1;
+    while (m = WAKE_RE.exec(t)) end = m.index + m[0].length;
+    return end < 0 ? t : t.slice(end).replace(/^[\s，,。.、！!？?]+/, "");
+  }
   function stripWake(text) {
     const t = (text || "").trim();
     WAKE_RE.lastIndex = 0;
@@ -1658,21 +1665,26 @@ var XRNav = (() => {
       const warn = p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : "";
       return L.summary(fromLabel, placeName(goal), diffName, km, Math.max(1, Math.round(p.time / 60)), via, warn);
     }
+    function fail(text) {
+      pending = null;
+      mode = api.isNavigating() ? "navigating" : "idle";
+      return say(text, { planned: false });
+    }
     function planAndConfirm(intent) {
       const L = t();
       const dest = resolvePlace(api.resort, intent.destination);
-      if (!intent.destination && !pending) return say(L.noDest(placeExamples()));
+      if (!intent.destination && !pending) return fail(L.noDest(placeExamples()));
       let goal = pending?.goal;
       if (intent.destination) {
-        if (!dest) return say(L.notFound(intent.destination, placeExamples()));
-        if (dest.ambiguous) return say(L.ambiguous(dest.ambiguous));
+        if (!dest) return fail(L.notFound(intent.destination, placeExamples()));
+        if (dest.ambiguous) return fail(L.ambiguous(dest.ambiguous));
         goal = dest.node;
       }
       let start = null, fromLabel = "";
       if (intent.start) {
         const s = resolvePlace(api.resort, intent.start);
-        if (!s) return say(L.notFound(intent.start, placeExamples()));
-        if (s.ambiguous) return say(L.ambiguous(s.ambiguous));
+        if (!s) return fail(L.notFound(intent.start, placeExamples()));
+        if (s.ambiguous) return fail(L.ambiguous(s.ambiguous));
         start = { startNode: s.node };
         fromLabel = placeName(s.node);
       } else if (api.isNavigating() && api.currentEdge()) {
@@ -1680,12 +1692,12 @@ var XRNav = (() => {
         fromLabel = api.edgeLabel(api.currentEdge());
       } else if (api.usesGps()) {
         const loc = locateStart();
-        if (!loc) return say(L.noStart);
+        if (!loc) return fail(L.noStart);
         start = loc;
         fromLabel = loc.label;
       } else {
         const n = api.defaultStart();
-        if (!n) return say(L.noStart);
+        if (!n) return fail(L.noStart);
         start = { startNode: n };
         fromLabel = placeName(n);
       }
@@ -1695,14 +1707,12 @@ var XRNav = (() => {
       if (intent.preferShort) want.preferShort = intent.preferShort === "yes";
       const p = api.plan({ ...start, goalNode: goal }, want);
       if (!p.ok) {
-        if (!api.isNavigating() && !intent.destination) pending = null;
-        mode = api.isNavigating() ? "navigating" : "idle";
-        return say(L.noRoute(p.reason, (p.hints || []).join("\uFF1B")));
+        return fail(L.noRoute(p.reason, (p.hints || []).join("\uFF1B")));
       }
       prefs = want;
-      pending = { ...start, goal, prefs: { ...p.prefs }, plan: p };
+      pending = { ...start, goal, prefs: { ...p.prefs }, plan: p, fromLabel };
       mode = "confirming";
-      return say(summarize2(p, fromLabel, goal), { awaiting: true });
+      return say(summarize2(p, fromLabel, goal), { awaiting: true, planned: true });
     }
     function say(text, extra = {}) {
       if (text) lastReply = text;
@@ -1794,8 +1804,88 @@ var XRNav = (() => {
           return say(L.unknown);
       }
     }
+    function facts() {
+      if (!pending?.plan) return null;
+      const p = pending.plan;
+      const runs = [...new Set(p.edges.filter((e) => e.type !== "connector").map((e) => api.edgeLabel(e)))];
+      return {
+        from: pending.fromLabel || "",
+        to: placeName(pending.goal),
+        distance_km: Math.round(p.length / 100) / 10,
+        minutes: Math.max(1, Math.round(p.time / 60)),
+        max_difficulty: DIFF_ZH[pending.prefs.maxDifficulty] || "",
+        lifts: p.liftCount || 0,
+        route: runs,
+        warnings: p.warnings || []
+      };
+    }
+    function statusFacts() {
+      if (!api.isNavigating()) return { navigating: false, mode, pending_route: facts() };
+      const s = api.snapshot();
+      const e = api.currentEdge();
+      const d = s.distToNext != null ? Math.round(s.distToNext / 10) * 10 : null;
+      return {
+        navigating: true,
+        state: s.stateZh || s.state,
+        location_unreliable: s.unreliable || (s.stale ? "\u5B9A\u4F4D\u4E2D\u65AD" : null),
+        next_instruction: d != null && d > 60 && s.nextPreview ? s.nextPreview : s.nextText || null,
+        distance_to_next_fork_m: d,
+        remaining_km: s.remaining != null ? Math.round(s.remaining / 100) / 10 : null,
+        speed_kmh: s.speed != null ? Math.round(s.speed * 3.6) : null,
+        current_run: e ? api.edgeLabel(e) : null,
+        destination: api.navGoal() ? placeName(api.navGoal()) : null
+      };
+    }
+    function tool(name, args = {}) {
+      const a = args || {};
+      const yn = (v) => v === true ? "yes" : v === false ? "no" : "";
+      let r;
+      switch (name) {
+        case "plan_route":
+          r = handle({
+            ...EMPTY,
+            intent: "navigate",
+            destination: a.destination || "",
+            start: a.start || "",
+            maxDifficulty: a.max_difficulty || 0,
+            avoidFlat: yn(a.avoid_flat),
+            preferShort: yn(a.prefer_short)
+          });
+          return {
+            planned: !!r.planned,
+            ref: r.say,
+            route: r.planned ? facts() : null,
+            note: r.planned ? "\u8FD8\u6CA1\u51FA\u53D1\uFF1A\u628A\u8DEF\u7EBF\u7B80\u77ED\u544A\u8BC9\u7528\u6237\u5E76\u95EE\u8981\u4E0D\u8981\u51FA\u53D1\uFF0C\u7528\u6237\u540C\u610F\u540E\u518D\u8C03\u7528 start_navigation" : null
+          };
+        case "easier_route":
+          r = handle({ ...EMPTY, intent: "easier" });
+          return { planned: !!r.planned, ref: r.say, route: r.planned ? facts() : null };
+        case "start_navigation":
+          r = handle({ ...EMPTY, intent: "confirm" });
+          return { started: r.event === "started", ref: r.say || null, event: r.event || null };
+        case "cancel_route":
+          r = handle({ ...EMPTY, intent: "cancel" });
+          return { ok: true };
+        case "control_navigation": {
+          const intent = { stop: "stop", pause: "pause", resume: "resume" }[a.action];
+          if (!intent) return { ok: false, error: "action \u53EA\u80FD\u662F stop / pause / resume" };
+          r = handle({ ...EMPTY, intent });
+          return { ok: !!r.event, ref: r.say, event: r.event || null };
+        }
+        case "get_status":
+          return statusFacts();
+        case "repeat_instruction": {
+          const t2 = api.replay() || lastReply;
+          return { instruction: t2 || null };
+        }
+        default:
+          return { error: `\u6CA1\u6709\u8FD9\u4E2A\u5DE5\u5177\uFF1A${name}` };
+      }
+    }
     return {
       handle,
+      tool,
+      status: statusFacts,
       get mode() {
         return mode;
       },
@@ -1837,6 +1927,60 @@ var XRNav = (() => {
       `\u5F53\u524D\u64AD\u62A5\u8BED\u8A00\uFF1A${lang === "ja" ? "\u65E5\u8BED" : "\u4E2D\u6587"}\u3002`,
       "",
       `\u96EA\u573A\uFF1A${resort.name}`,
+      "\u5730\u70B9\u8868\uFF1A",
+      places
+    ].join("\n");
+  }
+  var COMPANION_TOOLS = [
+    {
+      name: "plan_route",
+      description: "\u89C4\u5212\u53BB\u67D0\u4E2A\u5730\u70B9\u7684\u8DEF\u7EBF\uFF08\u4E0D\u4F1A\u51FA\u53D1\uFF09\u3002\u7528\u6237\u60F3\u53BB\u67D0\u5730\u3001\u6216\u60F3\u6539\u96BE\u5EA6/\u907F\u5F00\u5E73\u8DEF/\u8D70\u6700\u77ED\u65F6\u8C03\u7528\u3002\u8FD4\u56DE\u8DEF\u7EBF\u4E8B\u5B9E\uFF1B\u5730\u70B9\u627E\u4E0D\u5230\u6216\u6709\u6B67\u4E49\u65F6 ref \u91CC\u4F1A\u8BF4\u660E\uFF0C\u9700\u8981\u5411\u7528\u6237\u8FFD\u95EE\u3002",
+      input_schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          destination: { type: "string", description: "\u76EE\u7684\u5730\u540D\u79F0\uFF0C\u5C3D\u91CF\u7528\u5730\u70B9\u8868\u91CC\u7684\u5199\u6CD5\uFF1B\u53EA\u6539\u6761\u4EF6\u65F6\u53EF\u4E3A\u7A7A" },
+          start: { type: "string", description: "\u7528\u6237\u660E\u786E\u8BF4\u4E86\u51FA\u53D1\u5730\u624D\u586B\uFF0C\u5426\u5219\u4E0D\u586B\uFF08\u7A0B\u5E8F\u7528\u5F53\u524D\u4F4D\u7F6E\uFF09" },
+          max_difficulty: { type: "integer", enum: [1, 2, 3, 4], description: "\u96BE\u5EA6\u4E0A\u9650\uFF1A1 \u521D\u7EA7 2 \u4E2D\u7EA7 3 \u9AD8\u7EA7 4 \u4E13\u5BB6\uFF1B\u7528\u6237\u6CA1\u63D0\u5C31\u4E0D\u586B" },
+          avoid_flat: { type: "boolean", description: "\u7528\u6237\u6015\u5E73\u8DEF/\u4E0D\u60F3\u8E6C/\u4E0D\u60F3\u8D70\u8DEF" },
+          prefer_short: { type: "boolean", description: "\u7528\u6237\u8981\u6700\u77ED/\u6700\u5FEB" }
+        },
+        required: []
+      }
+    },
+    { name: "start_navigation", description: "\u7528\u6237\u540C\u610F\u51FA\u53D1\u540E\uFF0C\u6309\u521A\u89C4\u5212\u597D\u7684\u8DEF\u7EBF\u5F00\u59CB\u5BFC\u822A\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } },
+    { name: "cancel_route", description: "\u7528\u6237\u4E0D\u8981\u521A\u89C4\u5212\u7684\u8DEF\u7EBF\u4E86\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } },
+    { name: "easier_route", description: "\u7528\u6237\u7D2F\u4E86/\u89C9\u5F97\u96BE\uFF0C\u60F3\u6362\u66F4\u7B80\u5355\u7684\u8DEF\u7EBF\uFF08\u96BE\u5EA6\u964D\u4E00\u7EA7\uFF0C\u4ECE\u5F53\u524D\u4F4D\u7F6E\u91CD\u65B0\u89C4\u5212\uFF0C\u4E0D\u4F1A\u81EA\u52A8\u51FA\u53D1\uFF09\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } },
+    {
+      name: "control_navigation",
+      description: "\u7ED3\u675F\u3001\u6682\u505C\u6216\u7EE7\u7EED\u5BFC\u822A\u3002",
+      input_schema: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["stop", "pause", "resume"] } }, required: ["action"] }
+    },
+    { name: "get_status", description: "\u67E5\u5BFC\u822A\u72B6\u6001\uFF1A\u4E0B\u4E00\u6761\u63D0\u793A\u3001\u5230\u4E0B\u4E00\u4E2A\u5C94\u53E3\u7684\u8DDD\u79BB\u3001\u5269\u4F59\u8DDD\u79BB\u3001\u901F\u5EA6\u3001\u6240\u5728\u96EA\u9053\u3001\u5B9A\u4F4D\u662F\u5426\u53EF\u9760\u3002\u7528\u6237\u95EE\u8FD8\u6709\u591A\u8FDC\u3001\u5728\u54EA\u3001\u591A\u5FEB\u65F6\u8C03\u7528\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } },
+    { name: "repeat_instruction", description: "\u7528\u6237\u6CA1\u542C\u6E05\u5BFC\u822A\u63D0\u793A\u65F6\uFF0C\u53D6\u5F53\u524D\u7684\u5BFC\u822A\u63D0\u793A\u539F\u6587\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } }
+  ];
+  function companionSystemPrompt(resort, lang) {
+    const places = resort.pois.map((p) => `- ${[p.name, p.name_ja, ...p.aliases || []].filter(Boolean).join(" / ")}`).join("\n");
+    const ja = lang === "ja";
+    return [
+      "\u4F60\u662F\u201C\u96EA\u4EBA\u201D\uFF0C\u7528\u6237\u7684\u6ED1\u96EA\u966A\u6ED1\u4F19\u4F34\uFF0C\u4E5F\u662F\u4E2A\u61C2\u884C\u7684\u6559\u7EC3\u3002\u7528\u6237\u6234\u7740\u624B\u5957\u3001\u5728\u96EA\u9053\u4E0A\u6216\u7F06\u8F66\u4E0A\uFF0C\u901A\u8FC7\u8BED\u97F3\u548C\u4F60\u8BF4\u8BDD\uFF08\u8BED\u97F3\u8BC6\u522B\u53EF\u80FD\u6709\u9519\u5B57\uFF0C\u6309\u610F\u601D\u7406\u89E3\uFF09\u3002",
+      "",
+      "\u8BF4\u8BDD\u65B9\u5F0F\uFF1A",
+      `- \u4F60\u7684\u56DE\u590D\u4F1A\u88AB\u76F4\u63A5\u6717\u8BFB\u51FA\u6765\u3002\u7528${ja ? "\u65E5\u8BED" : "\u4E2D\u6587"}\u53E3\u8BED\uFF0C\u50CF\u670B\u53CB\u4E00\u6837\u81EA\u7136\u3001\u4EB2\u5207\uFF0C\u53EF\u4EE5\u8F7B\u677E\u5E7D\u9ED8\u3002`,
+      "- \u77ED\uFF01\u4E00\u822C\u4E00\u4E24\u53E5\u8BDD\uFF0C\u4E0D\u8D85\u8FC7 40 \u4E2A\u5B57\u3002\u4E0D\u7528\u5217\u8868\u3001\u7F16\u53F7\u3001\u62EC\u53F7\u3001\u8868\u60C5\u7B26\u53F7\u3001\u82F1\u6587\u7F29\u5199\u3002",
+      "- \u7528\u6237\u5728\u6ED1\u884C\u4E2D\uFF08\u5BFC\u822A\u4E2D\uFF09\u65F6\u66F4\u8981\u7B80\u77ED\uFF0C\u522B\u5206\u6563\u6CE8\u610F\u529B\uFF1B\u5728\u7F06\u8F66\u4E0A\u3001\u4F11\u606F\u65F6\u53EF\u4EE5\u591A\u804A\u4E24\u53E5\u3002",
+      "- \u53EF\u4EE5\u9F13\u52B1\u3001\u5938\u5956\u3001\u5173\u5FC3\u4F53\u529B\u548C\u5B89\u5168\uFF1B\u53EF\u4EE5\u7ED9\u901A\u7528\u7684\u6ED1\u96EA\u6280\u672F\u5EFA\u8BAE\uFF08\u91CD\u5FC3\u3001\u7ACB\u5203\u3001\u8F6C\u5F2F\u8282\u594F\u3001\u770B\u8FDC\u5904\u7B49\uFF09\uFF0C\u4F46\u4E0D\u8981\u957F\u7BC7\u8BF4\u6559\u3002",
+      "",
+      "\u5BFC\u822A\u89C4\u5219\uFF08\u5FC5\u987B\u9075\u5B88\uFF09\uFF1A",
+      "- \u8DEF\u7EBF\u3001\u96EA\u9053\u3001\u8DDD\u79BB\u3001\u65F6\u95F4\u3001\u5F00\u653E\u72B6\u6001\u53EA\u80FD\u6765\u81EA\u5DE5\u5177\u7ED3\u679C\uFF0C\u7EDD\u4E0D\u7F16\u9020\u3002\u5730\u56FE\u4E0A\u6CA1\u6709\u7684\u5730\u65B9\u5C31\u8BF4\u627E\u4E0D\u5230\uFF0C\u8BA9\u7528\u6237\u6362\u4E2A\u8BF4\u6CD5\u3002",
+      "- \u7528\u6237\u60F3\u53BB\u67D0\u5730 \u2192 \u8C03 plan_route\uFF0C\u628A\u7ED3\u679C\u7528\u81EA\u5DF1\u7684\u8BDD\u7B80\u77ED\u8BF4\u51FA\u6765\uFF08\u4ECE\u54EA\u5230\u54EA\u3001\u5927\u6982\u591A\u8FDC\u591A\u4E45\u3001\u6700\u96BE\u4EC0\u4E48\u7EA7\u522B\uFF09\uFF0C\u7136\u540E\u95EE\u8981\u4E0D\u8981\u51FA\u53D1\u3002",
+      "- \u7528\u6237\u540C\u610F\u51FA\u53D1 \u2192 \u8C03 start_navigation\u3002\u5F00\u59CB\u540E\u7B80\u77ED\u8BF4\u4E00\u53E5\u5C31\u884C\uFF0C\u8F6C\u5F2F\u63D0\u793A\u7531\u5BFC\u822A\u81EA\u52A8\u64AD\u62A5\uFF0C\u4F60\u4E0D\u8981\u81EA\u5DF1\u7ED9\u8F6C\u5F2F\u6307\u4EE4\u3002",
+      "- \u95EE\u8FD8\u6709\u591A\u8FDC\u3001\u5728\u54EA\u3001\u591A\u5FEB \u2192 \u8C03 get_status \u518D\u56DE\u7B54\u3002\u6CA1\u542C\u6E05\u63D0\u793A \u2192 repeat_instruction\u3002\u7D2F\u4E86\u60F3\u7B80\u5355\u70B9 \u2192 easier_route\u3002",
+      "- \u5DE5\u5177\u8BF4\u5B9A\u4F4D\u4E0D\u53EF\u9760\u65F6\uFF0C\u5982\u5B9E\u544A\u8BC9\u7528\u6237\uFF0C\u4E0D\u8981\u731C\u8DDD\u79BB\u548C\u65B9\u5411\u3002",
+      "- \u5B89\u5168\u7B2C\u4E00\uFF1A\u4E0D\u9F13\u52B1\u8D85\u51FA\u80FD\u529B\u7684\u96BE\u5EA6\u3001\u4E0D\u5EFA\u8BAE\u8FDB\u5165\u5173\u95ED\u6216\u672A\u77E5\u7684\u533A\u57DF\uFF1B\u7528\u6237\u8BF4\u53D7\u4F24\u3001\u8FF7\u8DEF\u3001\u5F88\u51B7\u5F88\u7D2F\u65F6\uFF0C\u5EFA\u8BAE\u505C\u5728\u5B89\u5168\u7684\u5730\u65B9\u3001\u8054\u7CFB\u96EA\u573A\u5DE1\u903B\u6216\u540C\u4F34\u3002",
+      "- \u7528\u6237\u53EA\u662F\u95F2\u804A\u5C31\u966A\u7740\u804A\uFF0C\u4E0D\u9700\u8981\u8C03\u5DE5\u5177\u3002",
+      "",
+      `\u96EA\u573A\uFF1A${resort.name}${resort.dataStatus === "fictional" ? "\uFF08\u865A\u6784\u7684\u6F14\u793A\u96EA\u573A\uFF09" : resort.dataStatus === "unverified" ? "\uFF08\u5730\u56FE\u6570\u636E\u672A\u6838\u5B9E\uFF0C\u5F00\u653E\u72B6\u6001\u672A\u77E5\uFF09" : ""}`,
       "\u5730\u70B9\u8868\uFF1A",
       places
     ].join("\n");
@@ -1990,6 +2134,26 @@ var XRNav = (() => {
       hasWake(text) {
         return hasWake(text);
       },
+      afterWake(text) {
+        return afterWake(text);
+      },
+      // 云端“雪人”：人设系统提示 + 工具定义；工具由原生层转调 tool()
+      companionPrompt() {
+        return J({ system: companionSystemPrompt(resort, lang), tools: COMPANION_TOOLS });
+      },
+      tool(name, argsJson, nowMs) {
+        if (nowMs != null) lastNow = nowMs;
+        let args = {};
+        try {
+          args = JSON.parse(argsJson || "{}");
+        } catch {
+        }
+        return J(companion.tool(name, args));
+      },
+      status(nowMs) {
+        if (nowMs != null) lastNow = nowMs;
+        return J(companion.status());
+      },
       // 给云端大模型的系统提示和输出格式
       brainPrompt() {
         return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA });
@@ -2076,7 +2240,8 @@ var XRNav = (() => {
           distToNext: s.distToNext,
           remaining: s.remaining,
           edge: s.matched?.edge ? edgeLabel(s.matched.edge) : null,
-          simT: sim ? sim.t : null
+          simT: sim ? sim.t : null,
+          routeKm: s.route ? s.route.reduce((a, e) => a + e.length, 0) / 1e3 : null
         });
       }
     };

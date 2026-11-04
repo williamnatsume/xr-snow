@@ -142,6 +142,43 @@ test('对话：没有更简单的路线时用一句话说明，继续原路线',
   assert.equal(e.say, '去山脚餐厅没有只走初级的路线，继续按原来的路线走。');
 });
 
+test('云端工具：规划 → 返回事实 → 出发 → 查状态 → 结束', () => {
+  const s = createSession(demoText);
+  s.configure('sim', 'S', 3);
+  const t = (name, args = {}) => JSON.parse(s.tool(name, JSON.stringify(args), 0));
+  const p = t('plan_route', { destination: '餐厅', max_difficulty: 2 });
+  assert.equal(p.planned, true);
+  assert.equal(p.route.from, '山顶');
+  assert.equal(p.route.to, '山脚餐厅');
+  assert.equal(p.route.max_difficulty, '中级');
+  assert.ok(p.route.distance_km > 1 && p.route.minutes >= 1);
+  assert.ok(p.route.route.some((r) => r.includes('东坡线')));
+  const amb = t('plan_route', { destination: '山脚' });
+  assert.equal(amb.planned, false);
+  assert.match(amb.ref, /山脚餐厅.*山脚缆车站|山脚缆车站.*山脚餐厅/);
+  t('plan_route', { destination: '山脚餐厅', max_difficulty: 2 });
+  const st = t('start_navigation');
+  assert.equal(st.started, true);
+  for (let i = 0; i < 60; i++) s.simStep();
+  const g = t('get_status');
+  assert.equal(g.navigating, true);
+  assert.equal(g.destination, '山脚餐厅');
+  assert.ok(g.remaining_km > 0);
+  assert.equal(t('control_navigation', { action: 'stop' }).event, 'stopped');
+  assert.equal(t('get_status').navigating, false);
+  assert.match(t('nope').error, /没有这个工具/);
+});
+
+test('云端人设提示：朗读用、短、事实只来自工具', () => {
+  const s = createSession(demoText);
+  const p = JSON.parse(s.companionPrompt());
+  assert.match(p.system, /陪滑伙伴/);
+  assert.match(p.system, /绝不编造/);
+  assert.ok(p.tools.some((x) => x.name === 'plan_route'));
+  assert.equal(s.afterWake('雪人，去餐厅'), '去餐厅');
+  assert.equal(s.afterWake('告诉我怎么走雪人。'), '');
+});
+
 test('云端提示：包含地点表，说明不由模型决定路线', () => {
   const p = brainSystemPrompt(R, 'zh');
   assert.ok(p.includes('山脚餐厅'));

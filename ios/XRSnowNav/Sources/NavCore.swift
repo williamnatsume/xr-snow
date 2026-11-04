@@ -63,6 +63,7 @@ struct NavSnapshot: Decodable {
     let remaining: Double?
     let edge: String?
     let simT: Double?
+    let routeKm: Double?
 }
 
 struct ConverseResult: Decodable {
@@ -241,6 +242,17 @@ final class NavSession {
     }
     func understandLocal(_ text: String) -> String { call("understandLocal", [text]) ?? "{\"intent\":\"unknown\"}" }
     func stripWake(_ text: String) -> String { call("stripWake", [text]) ?? text }
+    func afterWake(_ text: String) -> String { call("afterWake", [text]) ?? text }
+    // 云端雪人：人设系统提示 + 工具定义（JSON 对象，直接放进请求体）
+    func companionPrompt() -> (system: String, tools: Any)? {
+        guard let json = call("companionPrompt"), let d = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let sys = obj["system"] as? String, let tools = obj["tools"] else { return nil }
+        return (sys, tools)
+    }
+    func tool(_ name: String, argsJSON: String, nowMs: Double) -> String {
+        call("tool", [name, argsJSON, nowMs]) ?? "{\"error\":\"导航核心出错\"}"
+    }
     func hasWake(_ text: String) -> Bool { value.invokeMethod("hasWake", withArguments: [text])?.toBool() ?? false }
     func converse(intentJSON: String, nowMs: Double) -> ConverseResult {
         decode(ConverseResult.self, call("converse", [intentJSON, nowMs])) ?? ConverseResult(say: "导航核心出错", mode: "idle", awaiting: nil, event: nil)

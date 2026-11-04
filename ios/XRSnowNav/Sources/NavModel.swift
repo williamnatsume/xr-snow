@@ -73,6 +73,12 @@ final class NavModel {
     private var lastStatusReport = Date()
     private var gapAnnounced = false
     private var lastNavState = "idle"
+    private var wakeAcked = false
+    private var cloudStartedNav = false
+    private var runsToday = 0
+    private var navStartedAt = Date()
+    private var navPlanKm = 0.0
+    private var maxSpeed = 0.0
 
     init() {
         let d = UserDefaults.standard
@@ -83,7 +89,7 @@ final class NavModel {
         wakeWordOn = d.object(forKey: "wakeWordOn") as? Bool ?? true
         mode = Mode(rawValue: d.string(forKey: "mode") ?? "") ?? .sim
         simSpeed = d.object(forKey: "simSpeed") as? Double ?? 1
-        cloudModel = CloudModel(rawValue: d.string(forKey: "cloudModel") ?? "") ?? .opus
+        cloudModel = CloudModel(rawValue: d.string(forKey: "cloudModel2") ?? "") ?? .haiku
         recordWhileNav = d.object(forKey: "recordWhileNav") as? Bool ?? true
 
         do { core = try NavCore() } catch { fatalError = error.localizedDescription; return }
@@ -92,7 +98,7 @@ final class NavModel {
         location.onLocation = { [weak self] loc in self?.handle(loc) }
         location.onStatus = { [weak self] s in self?.status = s }
         speech.onSpeaking = { [weak self] on in self?.input.mute(on) }
-        input.onPartial = { [weak self] t in self?.partial = t }
+        input.onPartial = { [weak self] t in self?.onPartial(t) }
         input.onUtterance = { [weak self] t in self?.heard(t) }
         input.onStatus = { [weak self] s in self?.status = s; NSLog("[语音状态] %@", s) }
         NotificationCenter.default.addObserver(forName: .xueRenListen, object: nil, queue: .main) { [weak self] _ in
@@ -123,7 +129,7 @@ final class NavModel {
         let d = UserDefaults.standard
         d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang")
         d.set(voiceOn, forKey: "voiceOn"); d.set(wakeWordOn, forKey: "wakeWordOn"); d.set(mode.rawValue, forKey: "mode")
-        d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel"); d.set(recordWhileNav, forKey: "recordWhileNav")
+        d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav")
     }
 
     func loadResort() {
@@ -193,14 +199,31 @@ final class NavModel {
         }
     }
 
+    // 识别中的片段：一听到“雪人”马上回应（不等这句话说完）
+    private func onPartial(_ text: String) {
+        partial = text
+        guard let session, !wakeAcked, session.hasWake(text) else { return }
+        wakeAcked = true
+        openCommandWindow(seconds: 10)
+        Haptics.tap()
+        Chime.play()
+        // 0.7 秒后如果喊完“雪人”还没接着说，就回一声“我在”
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            if self.wakeAcked, session.afterWake(self.partial).isEmpty { self.reply("我在", note: "唤醒") }
+        }
+    }
+
     private func heard(_ text: String) {
         partial = ""
+        let acked = wakeAcked
+        wakeAcked = false
         guard let session else { return }
         let stripped = session.stripWake(text)
         let woke = session.hasWake(text)
         guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
         if stripped.isEmpty {
-            reply("我在。", note: "唤醒")
+            if !acked { reply("我在", note: "唤醒") }
             openCommandWindow(seconds: 8)
             return
         }
@@ -213,50 +236,98 @@ final class NavModel {
         guard let session else { return }
         chat.append(ChatLine(who: .user, text: text))
         configureSession()
-        var intent: String?
+        var say = ""
+        var awaiting = false
         var via = "离线规则"
-        if brain.hasKey, let p = session.brainPrompt() {
-            thinking = true
-            intent = await brain.interpret(text: text, context: contextLine(), history: history, system: p.system, schema: p.schema)
-            thinking = false
-            if intent != nil { via = "云端 \(cloudModel == .opus ? "Opus" : "Haiku")" }
-        }
-        let intentJSON = intent ?? session.understandLocal(text)
-        NSLog("[雪人] %@ → %@（%@）", text, intentJSON, via)
-        let r = session.converse(intentJSON: intentJSON, nowMs: nowMs)
-        history.append(BrainTurn(role: "user", text: text))
-        if !r.say.isEmpty { history.append(BrainTurn(role: "assistant", text: r.say)) }
-        if history.count > 12 { history.removeFirst(history.count - 12) }
+        cloudStartedNav = false
 
-        switch r.event {
+        if brain.hasKey, let p = session.companionPrompt() {
+            thinking = true
+            let reply = await brain.converse(text: text, context: contextLine(), history: history, system: p.system, tools: p.tools) { [weak self] name, args in
+                guard let self else { return "{}" }
+                let out = session.tool(name, argsJSON: args, nowMs: self.nowMs)
+                self.applyToolEvent(out)
+                return out
+            }
+            thinking = false
+            if let reply {
+                say = reply
+                via = "云端 \(cloudModel.short)"
+                awaiting = reply.hasSuffix("？") || reply.hasSuffix("?") || reply.hasSuffix("か")
+            }
+        }
+        if via == "离线规则" {
+            let intentJSON = session.understandLocal(text)
+            NSLog("[雪人] %@ → %@（离线规则）", text, intentJSON)
+            let r = session.converse(intentJSON: intentJSON, nowMs: nowMs)
+            applyEvent(r.event)
+            say = r.say
+            awaiting = r.awaiting == true
+        }
+        history.append(BrainTurn(role: "user", text: text))
+        if !say.isEmpty { history.append(BrainTurn(role: "assistant", text: say)) }
+        if history.count > 16 { history.removeFirst(history.count - 16) }
+
+        flushSpeech()
+        if !say.isEmpty { reply(say, note: via) }
+        // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了问题时更长）
+        let speakSec = Double(say.count) / 4
+        openCommandWindow(seconds: (awaiting ? 12 : 8) + speakSec)
+        await updateListening()
+        refresh()
+    }
+
+    // 云端工具执行后的副作用（开始 / 结束导航要启动或停止计时器）
+    private func applyToolEvent(_ json: String) {
+        guard let d = json.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let ev = obj["event"] as? String else { return }
+        if ev == "started" { cloudStartedNav = true }
+        applyEvent(ev)
+    }
+
+    private func applyEvent(_ ev: String?) {
+        switch ev {
         case "started": navStarted()
         case "stopped": navStopped()
         case "paused": paused = true; speech.stop()
         case "resumed": paused = false
         default: break
         }
-        flushSpeech()
-        if !r.say.isEmpty { reply(r.say, note: via) }
-        // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了“要出发吗？”时更长）
-        let speakSec = Double(r.say.count) / 4
-        openCommandWindow(seconds: (r.awaiting == true ? 12 : 8) + speakSec)
-        await updateListening()
-        refresh()
     }
 
     private func contextLine() -> String {
         let s = snapshot
-        var parts = ["雪场：\(info?.name ?? "")", "定位来源：\(mode.rawValue)"]
+        var parts = ["雪场：\(info?.name ?? "")", "定位来源：\(mode.rawValue)", "当地时间：\(Date().formatted(date: .omitted, time: .shortened))"]
         if navigating {
-            parts.append("正在导航（\(s?.stateZh ?? "")）")
+            parts.append("正在导航（\(s?.stateZh ?? "")），用户可能正在滑行，回复要很短")
             if let n = s?.nextText { parts.append("下一条提示：\(n)") }
+            if let v = s?.speed { parts.append("当前速度约 \(Int(v * 3.6)) km/h") }
         } else {
             parts.append("未在导航")
         }
-        if let last = history.last, last.role == "assistant", last.text.hasSuffix("？") || last.text.hasSuffix("?") {
-            parts.append("雪人刚问：\(last.text)")
-        }
+        if runsToday > 0 { parts.append("今天已经滑完 \(runsToday) 趟") }
         return parts.joined(separator: "；")
+    }
+
+    // 到达目的地：总结这一趟（云端用人设说，离线用模板）
+    private func arrived() async {
+        runsToday += 1
+        let minutes = max(1, Int(Date().timeIntervalSince(navStartedAt) / 60))
+        let km = navPlanKm
+        let top = Int(maxSpeed * 3.6)
+        var text = "到啦！这趟\(String(format: "%.1f", km))公里，用了\(minutes)分钟\(top > 0 ? "，最快\(top)公里每小时" : "")。歇会儿还是再来一趟？"
+        var via = "离线"
+        if brain.hasKey, let session, let p = session.companionPrompt() {
+            let event = "【事件】刚到达目的地。这一趟约 \(String(format: "%.1f", km)) 公里，用时约 \(minutes) 分钟，最高速度约 \(top) km/h，今天第 \(runsToday) 趟。用陪滑伙伴的口吻简短说一两句（祝贺/点评/关心），可以问下一步想干嘛。不要调用工具。"
+            if let r = await brain.converse(text: event, context: contextLine(), history: history, system: p.system, tools: p.tools, tool: { _, _ in "{}" }) {
+                text = r; via = "云端 \(cloudModel.short)"
+            }
+        }
+        history.append(BrainTurn(role: "user", text: "（到达目的地）"))
+        history.append(BrainTurn(role: "assistant", text: text))
+        reply(text, note: via)
+        openCommandWindow(seconds: 12 + Double(text.count) / 4)
+        await updateListening()
     }
 
     private func reply(_ text: String, note: String? = nil) {
@@ -268,6 +339,9 @@ final class NavModel {
 
     private func navStarted() {
         paused = false
+        navStartedAt = Date()
+        maxSpeed = 0
+        navPlanKm = (snapshotRemainingKm() ?? 0)
         if mode == .sim {
             startSimTimer()
         } else {
@@ -409,6 +483,8 @@ final class NavModel {
     private func flushSpeech() {
         guard let session else { return }
         for item in session.drainSpeech() {
+            // 云端雪人已经用自己的话说了“出发”，导航自带的“开始导航，前往…”就不再念
+            if item.key == "start" && cloudStartedNav { cloudStartedNav = false; continue }
             chat.append(ChatLine(who: .system, text: item.text, note: item.reason))
             NSLog("[播报] %@", item.text)
             if item.voice && !paused { speech.speak(item.text, lang: lang) }
@@ -419,10 +495,20 @@ final class NavModel {
     private func refresh() {
         snapshot = session?.snapshot(nowMs: nowMs)
         let st = snapshot?.state ?? "idle"
+        if let v = snapshot?.speed, navigating { maxSpeed = max(maxSpeed, v) }
         if st != lastNavState {
-            if st == "arrived" && mode == .gps && recorder.recording && !testing { finishRecording() }
+            if st == "arrived" {
+                if mode == .gps && recorder.recording && !testing { finishRecording() }
+                simTimer?.invalidate(); simTimer = nil
+                Task { await arrived() }
+            }
             lastNavState = st
         }
+    }
+
+    private func snapshotRemainingKm() -> Double? {
+        guard let s = session?.snapshot(nowMs: nowMs) else { return nil }
+        return s.remaining.map { $0 / 1000 } ?? s.routeKm
     }
 
     // MARK: - 开发

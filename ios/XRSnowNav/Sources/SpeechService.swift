@@ -47,13 +47,23 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
             }
         }
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: lang == "ja" ? "ja-JP" : "zh-CN")
+        u.voice = SpeechService.bestVoice(lang == "ja" ? "ja-JP" : "zh-CN")
         u.rate = AVSpeechUtteranceDefaultSpeechRate
         onSpeaking?(true)
         synth.speak(u)
     }
 
     func stop() { synth.stopSpeaking(at: .immediate) }
+
+    // 选音质最好的声音：高级 > 增强 > 默认（高级/增强声音需在 设置 → 辅助功能 → 朗读内容 → 声音 里下载）
+    private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
+    static func bestVoice(_ language: String) -> AVSpeechSynthesisVoice? {
+        if let v = voiceCache[language] { return v }
+        let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == language }
+        let best = all.max { a, b in a.quality.rawValue < b.quality.rawValue } ?? AVSpeechSynthesisVoice(language: language)
+        if let best { voiceCache[language] = best; NSLog("[Speech] %@ 使用声音：%@（质量 %d）", language, best.name, best.quality.rawValue) }
+        return best
+    }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in self.finished() }

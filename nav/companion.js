@@ -40,6 +40,15 @@ export function hasWake(text) {
   return WAKE_RE.test(text || '');
 }
 
+// 最后一个唤醒词之后的文字（用来判断喊完“雪人”之后有没有接着说）
+export function afterWake(text) {
+  const t = text || '';
+  WAKE_RE.lastIndex = 0;
+  let m, end = -1;
+  while ((m = WAKE_RE.exec(t))) end = m.index + m[0].length;
+  return end < 0 ? t : t.slice(end).replace(/^[\s，,。.、！!？?]+/, '');
+}
+
 // 去掉唤醒词（在句子任何位置）：“雪人，去山腰站” / “告诉我怎么走，雪人” / “雪人。雪人我想去餐厅”
 export function stripWake(text) {
   const t = (text || '').trim();
@@ -224,32 +233,39 @@ export function createCompanion(api) {
     return L.summary(fromLabel, placeName(goal), diffName, km, Math.max(1, Math.round(p.time / 60)), via, warn);
   }
 
+  // 新的规划请求没成功：丢掉之前待确认的路线，免得用户说“好”时出发去旧目的地
+  function fail(text) {
+    pending = null;
+    mode = api.isNavigating() ? 'navigating' : 'idle';
+    return say(text, { planned: false });
+  }
+
   function planAndConfirm(intent) {
     const L = t();
     const dest = resolvePlace(api.resort, intent.destination);
-    if (!intent.destination && !pending) return say(L.noDest(placeExamples()));
+    if (!intent.destination && !pending) return fail(L.noDest(placeExamples()));
     let goal = pending?.goal;
     if (intent.destination) {
-      if (!dest) return say(L.notFound(intent.destination, placeExamples()));
-      if (dest.ambiguous) return say(L.ambiguous(dest.ambiguous));
+      if (!dest) return fail(L.notFound(intent.destination, placeExamples()));
+      if (dest.ambiguous) return fail(L.ambiguous(dest.ambiguous));
       goal = dest.node;
     }
     // 起点：说了就用说的；否则用当前位置；模拟模式下用默认起点
     let start = null, fromLabel = '';
     if (intent.start) {
       const s = resolvePlace(api.resort, intent.start);
-      if (!s) return say(L.notFound(intent.start, placeExamples()));
-      if (s.ambiguous) return say(L.ambiguous(s.ambiguous));
+      if (!s) return fail(L.notFound(intent.start, placeExamples()));
+      if (s.ambiguous) return fail(L.ambiguous(s.ambiguous));
       start = { startNode: s.node }; fromLabel = placeName(s.node);
     } else if (api.isNavigating() && api.currentEdge()) {
       start = { startEdgeId: api.currentEdge().id }; fromLabel = api.edgeLabel(api.currentEdge());
     } else if (api.usesGps()) {
       const loc = locateStart();
-      if (!loc) return say(L.noStart);
+      if (!loc) return fail(L.noStart);
       start = loc; fromLabel = loc.label;
     } else {
       const n = api.defaultStart();
-      if (!n) return say(L.noStart);
+      if (!n) return fail(L.noStart);
       start = { startNode: n }; fromLabel = placeName(n);
     }
     // 条件只在规划成功后才记住，失败时不改变用户原来的设定
@@ -259,14 +275,12 @@ export function createCompanion(api) {
     if (intent.preferShort) want.preferShort = intent.preferShort === 'yes';
     const p = api.plan({ ...start, goalNode: goal }, want);
     if (!p.ok) {
-      if (!api.isNavigating() && !intent.destination) pending = null;
-      mode = api.isNavigating() ? 'navigating' : 'idle';
-      return say(L.noRoute(p.reason, (p.hints || []).join('；')));
+      return fail(L.noRoute(p.reason, (p.hints || []).join('；')));
     }
     prefs = want;
-    pending = { ...start, goal, prefs: { ...p.prefs }, plan: p };
+    pending = { ...start, goal, prefs: { ...p.prefs }, plan: p, fromLabel };
     mode = 'confirming';
-    return say(summarize(p, fromLabel, goal), { awaiting: true });
+    return say(summarize(p, fromLabel, goal), { awaiting: true, planned: true });
   }
 
   function say(text, extra = {}) {
@@ -347,8 +361,82 @@ export function createCompanion(api) {
     }
   }
 
+
+  // 给云端大模型调用的工具：执行动作，返回事实（大模型用自己的话说给用户）。
+  // ref 是本地模板的说法，供大模型参考；事实只来自地图和导航状态。
+  function facts() {
+    if (!pending?.plan) return null;
+    const p = pending.plan;
+    const runs = [...new Set(p.edges.filter((e) => e.type !== 'connector').map((e) => api.edgeLabel(e)))];
+    return {
+      from: pending.fromLabel || '', to: placeName(pending.goal),
+      distance_km: Math.round(p.length / 100) / 10,
+      minutes: Math.max(1, Math.round(p.time / 60)),
+      max_difficulty: DIFF_ZH[pending.prefs.maxDifficulty] || '',
+      lifts: p.liftCount || 0,
+      route: runs,
+      warnings: p.warnings || []
+    };
+  }
+
+  function statusFacts() {
+    if (!api.isNavigating()) return { navigating: false, mode, pending_route: facts() };
+    const s = api.snapshot();
+    const e = api.currentEdge();
+    const d = s.distToNext != null ? Math.round(s.distToNext / 10) * 10 : null;
+    return {
+      navigating: true,
+      state: s.stateZh || s.state,
+      location_unreliable: s.unreliable || (s.stale ? '定位中断' : null),
+      next_instruction: d != null && d > 60 && s.nextPreview ? s.nextPreview : (s.nextText || null),
+      distance_to_next_fork_m: d,
+      remaining_km: s.remaining != null ? Math.round(s.remaining / 100) / 10 : null,
+      speed_kmh: s.speed != null ? Math.round(s.speed * 3.6) : null,
+      current_run: e ? api.edgeLabel(e) : null,
+      destination: api.navGoal() ? placeName(api.navGoal()) : null
+    };
+  }
+
+  function tool(name, args = {}) {
+    const a = args || {};
+    const yn = (v) => (v === true ? 'yes' : v === false ? 'no' : '');
+    let r;
+    switch (name) {
+      case 'plan_route':
+        r = handle({ ...EMPTY, intent: 'navigate', destination: a.destination || '', start: a.start || '',
+          maxDifficulty: a.max_difficulty || 0, avoidFlat: yn(a.avoid_flat), preferShort: yn(a.prefer_short) });
+        return { planned: !!r.planned, ref: r.say, route: r.planned ? facts() : null,
+          note: r.planned ? '还没出发：把路线简短告诉用户并问要不要出发，用户同意后再调用 start_navigation' : null };
+      case 'easier_route':
+        r = handle({ ...EMPTY, intent: 'easier' });
+        return { planned: !!r.planned, ref: r.say, route: r.planned ? facts() : null };
+      case 'start_navigation':
+        r = handle({ ...EMPTY, intent: 'confirm' });
+        return { started: r.event === 'started', ref: r.say || null, event: r.event || null };
+      case 'cancel_route':
+        r = handle({ ...EMPTY, intent: 'cancel' });
+        return { ok: true };
+      case 'control_navigation': {
+        const intent = { stop: 'stop', pause: 'pause', resume: 'resume' }[a.action];
+        if (!intent) return { ok: false, error: 'action 只能是 stop / pause / resume' };
+        r = handle({ ...EMPTY, intent });
+        return { ok: !!r.event, ref: r.say, event: r.event || null };
+      }
+      case 'get_status':
+        return statusFacts();
+      case 'repeat_instruction': {
+        const t = api.replay() || lastReply;
+        return { instruction: t || null };
+      }
+      default:
+        return { error: `没有这个工具：${name}` };
+    }
+  }
+
   return {
     handle,
+    tool,
+    status: statusFacts,
     get mode() { return mode; },
     get pending() { return pending; },
     get prefs() { return { ...prefs }; },
@@ -381,6 +469,62 @@ export function brainSystemPrompt(resort, lang) {
     `当前播报语言：${lang === 'ja' ? '日语' : '中文'}。`,
     '',
     `雪场：${resort.name}`,
+    '地点表：',
+    places
+  ].join('\n');
+}
+
+// 云端大模型可以调用的工具（Claude Messages API 的 tools 格式）
+export const COMPANION_TOOLS = [
+  {
+    name: 'plan_route',
+    description: '规划去某个地点的路线（不会出发）。用户想去某地、或想改难度/避开平路/走最短时调用。返回路线事实；地点找不到或有歧义时 ref 里会说明，需要向用户追问。',
+    input_schema: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        destination: { type: 'string', description: '目的地名称，尽量用地点表里的写法；只改条件时可为空' },
+        start: { type: 'string', description: '用户明确说了出发地才填，否则不填（程序用当前位置）' },
+        max_difficulty: { type: 'integer', enum: [1, 2, 3, 4], description: '难度上限：1 初级 2 中级 3 高级 4 专家；用户没提就不填' },
+        avoid_flat: { type: 'boolean', description: '用户怕平路/不想蹬/不想走路' },
+        prefer_short: { type: 'boolean', description: '用户要最短/最快' }
+      },
+      required: []
+    }
+  },
+  { name: 'start_navigation', description: '用户同意出发后，按刚规划好的路线开始导航。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } },
+  { name: 'cancel_route', description: '用户不要刚规划的路线了。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } },
+  { name: 'easier_route', description: '用户累了/觉得难，想换更简单的路线（难度降一级，从当前位置重新规划，不会自动出发）。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } },
+  {
+    name: 'control_navigation', description: '结束、暂停或继续导航。',
+    input_schema: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', enum: ['stop', 'pause', 'resume'] } }, required: ['action'] }
+  },
+  { name: 'get_status', description: '查导航状态：下一条提示、到下一个岔口的距离、剩余距离、速度、所在雪道、定位是否可靠。用户问还有多远、在哪、多快时调用。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } },
+  { name: 'repeat_instruction', description: '用户没听清导航提示时，取当前的导航提示原文。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } }
+];
+
+// “雪人”的人设：陪滑伙伴 + 教练。回复会被朗读。
+export function companionSystemPrompt(resort, lang) {
+  const places = resort.pois.map((p) => `- ${[p.name, p.name_ja, ...(p.aliases || [])].filter(Boolean).join(' / ')}`).join('\n');
+  const ja = lang === 'ja';
+  return [
+    '你是“雪人”，用户的滑雪陪滑伙伴，也是个懂行的教练。用户戴着手套、在雪道上或缆车上，通过语音和你说话（语音识别可能有错字，按意思理解）。',
+    '',
+    '说话方式：',
+    `- 你的回复会被直接朗读出来。用${ja ? '日语' : '中文'}口语，像朋友一样自然、亲切，可以轻松幽默。`,
+    '- 短！一般一两句话，不超过 40 个字。不用列表、编号、括号、表情符号、英文缩写。',
+    '- 用户在滑行中（导航中）时更要简短，别分散注意力；在缆车上、休息时可以多聊两句。',
+    '- 可以鼓励、夸奖、关心体力和安全；可以给通用的滑雪技术建议（重心、立刃、转弯节奏、看远处等），但不要长篇说教。',
+    '',
+    '导航规则（必须遵守）：',
+    '- 路线、雪道、距离、时间、开放状态只能来自工具结果，绝不编造。地图上没有的地方就说找不到，让用户换个说法。',
+    '- 用户想去某地 → 调 plan_route，把结果用自己的话简短说出来（从哪到哪、大概多远多久、最难什么级别），然后问要不要出发。',
+    '- 用户同意出发 → 调 start_navigation。开始后简短说一句就行，转弯提示由导航自动播报，你不要自己给转弯指令。',
+    '- 问还有多远、在哪、多快 → 调 get_status 再回答。没听清提示 → repeat_instruction。累了想简单点 → easier_route。',
+    '- 工具说定位不可靠时，如实告诉用户，不要猜距离和方向。',
+    '- 安全第一：不鼓励超出能力的难度、不建议进入关闭或未知的区域；用户说受伤、迷路、很冷很累时，建议停在安全的地方、联系雪场巡逻或同伴。',
+    '- 用户只是闲聊就陪着聊，不需要调工具。',
+    '',
+    `雪场：${resort.name}${resort.dataStatus === 'fictional' ? '（虚构的演示雪场）' : resort.dataStatus === 'unverified' ? '（地图数据未核实，开放状态未知）' : ''}`,
     '地点表：',
     places
   ].join('\n');
