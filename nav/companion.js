@@ -31,7 +31,7 @@ export const INTENT_SCHEMA = {
 
 export const WAKE_WORDS = ['雪人', '雪だるま', 'ゆきだるま'];
 // 语音识别可能写成的同音字（实测会出现在句首、句中、句尾）
-const WAKE_RE = /(嘿|喂|哎|hey|ねえ)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま|スノーマン|snow\s?man)[，,。.！!？?、\s]*/gi;
+const WAKE_RE = /(嘿|喂|哎|hey|ねえ)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま|スノーマン|斯诺曼|snow\s?(?:man|men|mann|版|曼|门))[，,。.！!？?、\s]*/gi;
 
 const EMPTY = { intent: 'unknown', destination: '', start: '', maxDifficulty: 0, avoidFlat: '', preferShort: '', reply: '' };
 
@@ -71,20 +71,27 @@ const RULES = [
   ['distance', /(多远|还有多少|还要多久|多长时间|还有几|距离|あとどれ|どのくらい|何メートル)/],
   ['easier', /(简单点|简单一点|轻松|容易点|容易一点|累了|好累|太难|太陡|簡単|楽な)/],
   ['where', /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/],
-  ['cancel', /^(不要|不用|取消|算了|不了|不去了|别去了|いいえ|やめ|キャンセル)/],
-  ['confirm', /^(好|好的|好啊|开始|出发|走吧|走|可以|行|对|是的|嗯|没问题|ok|okay|go|はい|お願い|スタート|行こう)/i]
 ];
+// 确认 / 取消：只有整句就是这类短回答时才算（“走，我们去山脚”不是确认，是新目的地）
+const TAIL = '[吧啊呀了哈的嘛！!。.，,、\\s]*';
+const YES = '(?:好的|好啊|好吧|好|开始|出发|走吧|走|可以|行|对的|对|是的|是|嗯|没问题|ok|okay|go|yes|sure|はい|うん|お願い|スタート|行こう)';
+const CONFIRM_RE = new RegExp(`^${YES}(?:[，,、\\s]*${YES})*${TAIL}$`, 'i');
+const CANCEL_RE = new RegExp(`^(不要|不用|取消|算了|不了|不去了|别去了|no|nope|いいえ|やめ|キャンセル)${TAIL}$`, 'i');
+const LEAD_RE = new RegExp(`^(好|好的|好啊|走|走吧|那|那就|嗯|ok|okay)[，,、\\s]+`, 'i');
+// 没认出地名时，取“去 / 到 / 回 …”后面的部分当目的地原文（交给模糊匹配）
+const DEST_RE = /(?:想去|要去|带我去|我们去|咱们去|去|到|回|前往)(.{1,14}?)(?:吧|呀|啊|吗|。|，|,|！|!|$)/;
 
 // 本地规则：没有网络或云端失败时使用
 export function rulesIntent(text, resort) {
-  const t = stripWake(text);
+  let t = stripWake(text);
   if (!t) return { ...EMPTY, intent: 'unknown' };
+  if (CONFIRM_RE.test(t)) return { ...EMPTY, intent: 'confirm' };
+  if (CANCEL_RE.test(t)) return { ...EMPTY, intent: 'cancel' };
+  t = t.replace(LEAD_RE, '');   // “走，我们去…” → “我们去…”
   const req = parseRequest(t, resort);
   const hasPlace = !!(req.destination || req.ambiguous.length);
   for (const [intent, re] of RULES) {
     if (!re.test(t)) continue;
-    // “好，去山腰站” 这类带地名的句子按新目的地处理
-    if ((intent === 'confirm' || intent === 'cancel') && hasPlace) break;
     if (intent === 'easier') return { ...EMPTY, intent, maxDifficulty: 0 };
     return { ...EMPTY, intent };
   }
@@ -100,10 +107,35 @@ export function rulesIntent(text, resort) {
       preferShort: req.preferShort ? 'yes' : ''
     };
   }
+  // 地名没认出来（常见于语音识别写错字）：取“去…”后面的部分，交给模糊匹配
+  const m = DEST_RE.exec(t);
+  const raw = m ? m[1].trim() : '';
+  if (raw && resolvePlace(resort, raw)) return { ...EMPTY, intent: 'navigate', destination: raw };
+  if (!m && t.length <= 8 && resolvePlace(resort, t)?.guess) return { ...EMPTY, intent: 'navigate', destination: t };
   return { ...EMPTY, intent: 'unknown' };
 }
 
-// 地名 → 地点。返回 { node, name } / { ambiguous: [名称…] } / null
+// 读音：iOS 端注入 XRPinyin（汉字 → 拼音，CFStringTransform）；没有时（node 测试）按字比较
+function sounds(s) {
+  const clean = (s || '').replace(/[\s，,。.、！!？?]/g, '');
+  const py = typeof globalThis.XRPinyin === 'function' ? globalThis.XRPinyin(clean) : null;
+  return py ? py.toLowerCase().split(/\s+/).filter(Boolean) : [...clean];
+}
+
+function lcs(a, b) {
+  const dp = Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = 0;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+// 地名 →返回 { node, name } / { ambiguous: [名称…] } / null
 export function resolvePlace(resort, text) {
   const q = (text || '').replace(/\s+/g, '');
   if (!q) return null;
@@ -126,7 +158,35 @@ export function resolvePlace(resort, text) {
     if (n.name === q) add(n.id, n.name, 3);
     else if (q.length >= 2 && (n.name.includes(q) || q.includes(n.name))) add(n.id, n.name, 1);
   }
-  if (!cands.length) return null;
+  if (!cands.length) {
+    // 模糊匹配：按读音（或字）的最长公共子序列，覆盖地名一半以上才算；结果标为 guess，要向用户确认
+    const qs = sounds(q);
+    const fuzzy = [];
+    const all = [
+      ...resort.pois.map((p) => ({ node: p.node, name: p.name, names: [p.name, p.name_ja, ...(p.aliases || [])].filter(Boolean) })),
+      ...[...resort.nodes.values()].filter((n) => n.name && !resort.pois.some((p) => p.node === n.id)).map((n) => ({ node: n.id, name: n.name, names: [n.name] }))
+    ];
+    for (const c of all) {
+      let best = 0, bestLen = 0;
+      for (const n of c.names) {
+        const ns = sounds(n);
+        const l = lcs(qs, ns);
+        const score = l / ns.length;
+        if (l >= 2 && score > best) { best = score; bestLen = l; }
+      }
+      if (best >= 0.5) fuzzy.push({ node: c.node, name: c.name, score: best + bestLen / 100 });
+    }
+    // 只有一个字（例如“脚”）：列出包含它的地点让用户选
+    if (!fuzzy.length && q.length === 1 && /[\u4e00-\u9fff]/.test(q)) {
+      const hits = all.filter((c) => c.names.some((n) => n.includes(q)));
+      if (hits.length === 1) return { node: hits[0].node, name: hits[0].name, guess: true };
+      if (hits.length > 1 && hits.length <= 3) return { ambiguous: hits.map((h) => h.name) };
+    }
+    if (!fuzzy.length) return null;
+    fuzzy.sort((a, b) => b.score - a.score);
+    if (fuzzy.length > 1 && fuzzy[1].score >= fuzzy[0].score - 0.05) return { ambiguous: fuzzy.slice(0, 3).map((f) => f.name) };
+    return { node: fuzzy[0].node, name: fuzzy[0].name, guess: true };
+  }
   const best = Math.max(...cands.map((c) => c.score));
   const top = cands.filter((c) => c.score === best);
   if (top.length === 1) return top[0];
@@ -139,6 +199,7 @@ const DIFF_JA = { 1: '初級', 2: '中級', 3: '上級', 4: 'エキスパート'
 const T = {
   zh: {
     noDest: (ex) => `要去哪里？比如：${ex}`,
+    guess: (name) => `你是说${name}吧？`,
     notFound: (q, ex) => `地图上没有找到“${q}”。可以去：${ex}`,
     ambiguous: (list) => `你说的是${list.join('，还是')}？`,
     noStart: '我还不知道你现在在哪。请说从哪里出发，比如“从山顶出发去餐厅”。',
@@ -166,6 +227,7 @@ const T = {
   },
   ja: {
     noDest: (ex) => `どこへ行きますか？例えば：${ex}`,
+    guess: (name) => `${name}のこと？`,
     notFound: (q, ex) => `地図に「${q}」が見つかりません。行ける場所：${ex}`,
     ambiguous: (list) => `${list.join('と')}のどちらですか？`,
     noStart: '現在地がまだわかりません。「山頂からレストランへ」のように出発地を言ってください。',
@@ -280,7 +342,8 @@ export function createCompanion(api) {
     prefs = want;
     pending = { ...start, goal, prefs: { ...p.prefs }, plan: p, fromLabel };
     mode = 'confirming';
-    return say(summarize(p, fromLabel, goal), { awaiting: true, planned: true });
+    const prefix = dest?.guess && intent.destination ? L.guess(placeName(goal)) : '';
+    return say(prefix + summarize(p, fromLabel, goal), { awaiting: true, planned: true });
   }
 
   function say(text, extra = {}) {

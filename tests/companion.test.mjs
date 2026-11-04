@@ -52,6 +52,30 @@ test('本地规则：常见说法', () => {
   assert.equal(rulesIntent('好，去山腰站', R).intent, 'navigate');
 });
 
+test('本地规则：实测识别结果（截图里的说法）', () => {
+  // “走，我们去…” 不是确认
+  assert.notEqual(rulesIntent('走，我们去脚脚缆车', R).intent, 'confirm');
+  const a = rulesIntent('走，我们去脚脚缆车', R);
+  assert.equal(a.intent, 'navigate');
+  assert.equal(resolvePlace(R, a.destination).name, '山脚缆车站');
+  assert.equal(resolvePlace(R, a.destination).guess, true);
+  // 只说了“脚”：列出候选
+  const b = rulesIntent('走，我们去脚', R);
+  assert.equal(b.intent, 'navigate');
+  assert.ok(resolvePlace(R, b.destination).ambiguous.length >= 2);
+  assert.equal(rulesIntent('好的', R).intent, 'confirm');
+  assert.equal(rulesIntent('走吧！', R).intent, 'confirm');
+  assert.ok(hasWake('snow版'));
+});
+
+test('对话：识别错字时猜一个地点并确认', () => {
+  const { talk } = session();
+  const a = talk('走，我们去脚脚缆车');
+  assert.equal(a.mode, 'confirming');
+  assert.match(a.say, /^你是说山脚缆车站吧？/);
+  assert.equal(talk('对').event, 'started');
+});
+
 test('地名解析：精确、别名、歧义、找不到', () => {
   assert.equal(resolvePlace(R, '山腰站').node, 'M');
   assert.equal(resolvePlace(R, '餐厅').node, 'REST');

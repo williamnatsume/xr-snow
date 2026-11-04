@@ -1494,7 +1494,7 @@ var XRNav = (() => {
     }
   };
   var WAKE_WORDS = ["\u96EA\u4EBA", "\u96EA\u3060\u308B\u307E", "\u3086\u304D\u3060\u308B\u307E"];
-  var WAKE_RE = /(嘿|喂|哎|hey|ねえ)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま|スノーマン|snow\s?man)[，,。.！!？?、\s]*/gi;
+  var WAKE_RE = /(嘿|喂|哎|hey|ねえ)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま|スノーマン|斯诺曼|snow\s?(?:man|men|mann|版|曼|门))[，,。.！!？?、\s]*/gi;
   var EMPTY = { intent: "unknown", destination: "", start: "", maxDifficulty: 0, avoidFlat: "", preferShort: "", reply: "" };
   function hasWake(text) {
     WAKE_RE.lastIndex = 0;
@@ -1525,18 +1525,24 @@ var XRNav = (() => {
     ["repeat", /(再说一遍|再说一次|重复|没听清|刚才说什么|もう一度|もう一回)/],
     ["distance", /(多远|还有多少|还要多久|多长时间|还有几|距离|あとどれ|どのくらい|何メートル)/],
     ["easier", /(简单点|简单一点|轻松|容易点|容易一点|累了|好累|太难|太陡|簡単|楽な)/],
-    ["where", /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/],
-    ["cancel", /^(不要|不用|取消|算了|不了|不去了|别去了|いいえ|やめ|キャンセル)/],
-    ["confirm", /^(好|好的|好啊|开始|出发|走吧|走|可以|行|对|是的|嗯|没问题|ok|okay|go|はい|お願い|スタート|行こう)/i]
+    ["where", /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/]
   ];
+  var TAIL = "[\u5427\u554A\u5440\u4E86\u54C8\u7684\u561B\uFF01!\u3002.\uFF0C,\u3001\\s]*";
+  var YES = "(?:\u597D\u7684|\u597D\u554A|\u597D\u5427|\u597D|\u5F00\u59CB|\u51FA\u53D1|\u8D70\u5427|\u8D70|\u53EF\u4EE5|\u884C|\u5BF9\u7684|\u5BF9|\u662F\u7684|\u662F|\u55EF|\u6CA1\u95EE\u9898|ok|okay|go|yes|sure|\u306F\u3044|\u3046\u3093|\u304A\u9858\u3044|\u30B9\u30BF\u30FC\u30C8|\u884C\u3053\u3046)";
+  var CONFIRM_RE = new RegExp(`^${YES}(?:[\uFF0C,\u3001\\s]*${YES})*${TAIL}$`, "i");
+  var CANCEL_RE = new RegExp(`^(\u4E0D\u8981|\u4E0D\u7528|\u53D6\u6D88|\u7B97\u4E86|\u4E0D\u4E86|\u4E0D\u53BB\u4E86|\u522B\u53BB\u4E86|no|nope|\u3044\u3044\u3048|\u3084\u3081|\u30AD\u30E3\u30F3\u30BB\u30EB)${TAIL}$`, "i");
+  var LEAD_RE = new RegExp(`^(\u597D|\u597D\u7684|\u597D\u554A|\u8D70|\u8D70\u5427|\u90A3|\u90A3\u5C31|\u55EF|ok|okay)[\uFF0C,\u3001\\s]+`, "i");
+  var DEST_RE = /(?:想去|要去|带我去|我们去|咱们去|去|到|回|前往)(.{1,14}?)(?:吧|呀|啊|吗|。|，|,|！|!|$)/;
   function rulesIntent(text, resort) {
-    const t = stripWake(text);
+    let t = stripWake(text);
     if (!t) return { ...EMPTY, intent: "unknown" };
+    if (CONFIRM_RE.test(t)) return { ...EMPTY, intent: "confirm" };
+    if (CANCEL_RE.test(t)) return { ...EMPTY, intent: "cancel" };
+    t = t.replace(LEAD_RE, "");
     const req = parseRequest(t, resort);
     const hasPlace = !!(req.destination || req.ambiguous.length);
     for (const [intent, re] of RULES) {
       if (!re.test(t)) continue;
-      if ((intent === "confirm" || intent === "cancel") && hasPlace) break;
       if (intent === "easier") return { ...EMPTY, intent, maxDifficulty: 0 };
       return { ...EMPTY, intent };
     }
@@ -1552,7 +1558,28 @@ var XRNav = (() => {
         preferShort: req.preferShort ? "yes" : ""
       };
     }
+    const m = DEST_RE.exec(t);
+    const raw = m ? m[1].trim() : "";
+    if (raw && resolvePlace(resort, raw)) return { ...EMPTY, intent: "navigate", destination: raw };
+    if (!m && t.length <= 8 && resolvePlace(resort, t)?.guess) return { ...EMPTY, intent: "navigate", destination: t };
     return { ...EMPTY, intent: "unknown" };
+  }
+  function sounds(s) {
+    const clean = (s || "").replace(/[\s，,。.、！!？?]/g, "");
+    const py = typeof globalThis.XRPinyin === "function" ? globalThis.XRPinyin(clean) : null;
+    return py ? py.toLowerCase().split(/\s+/).filter(Boolean) : [...clean];
+  }
+  function lcs(a, b) {
+    const dp = Array(b.length + 1).fill(0);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = 0;
+      for (let j = 1; j <= b.length; j++) {
+        const tmp = dp[j];
+        dp[j] = a[i - 1] === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+        prev = tmp;
+      }
+    }
+    return dp[b.length];
   }
   function resolvePlace(resort, text) {
     const q = (text || "").replace(/\s+/g, "");
@@ -1576,7 +1603,36 @@ var XRNav = (() => {
       if (n.name === q) add(n.id, n.name, 3);
       else if (q.length >= 2 && (n.name.includes(q) || q.includes(n.name))) add(n.id, n.name, 1);
     }
-    if (!cands.length) return null;
+    if (!cands.length) {
+      const qs = sounds(q);
+      const fuzzy = [];
+      const all = [
+        ...resort.pois.map((p) => ({ node: p.node, name: p.name, names: [p.name, p.name_ja, ...p.aliases || []].filter(Boolean) })),
+        ...[...resort.nodes.values()].filter((n) => n.name && !resort.pois.some((p) => p.node === n.id)).map((n) => ({ node: n.id, name: n.name, names: [n.name] }))
+      ];
+      for (const c of all) {
+        let best2 = 0, bestLen = 0;
+        for (const n of c.names) {
+          const ns = sounds(n);
+          const l = lcs(qs, ns);
+          const score = l / ns.length;
+          if (l >= 2 && score > best2) {
+            best2 = score;
+            bestLen = l;
+          }
+        }
+        if (best2 >= 0.5) fuzzy.push({ node: c.node, name: c.name, score: best2 + bestLen / 100 });
+      }
+      if (!fuzzy.length && q.length === 1 && /[\u4e00-\u9fff]/.test(q)) {
+        const hits = all.filter((c) => c.names.some((n) => n.includes(q)));
+        if (hits.length === 1) return { node: hits[0].node, name: hits[0].name, guess: true };
+        if (hits.length > 1 && hits.length <= 3) return { ambiguous: hits.map((h) => h.name) };
+      }
+      if (!fuzzy.length) return null;
+      fuzzy.sort((a, b) => b.score - a.score);
+      if (fuzzy.length > 1 && fuzzy[1].score >= fuzzy[0].score - 0.05) return { ambiguous: fuzzy.slice(0, 3).map((f) => f.name) };
+      return { node: fuzzy[0].node, name: fuzzy[0].name, guess: true };
+    }
     const best = Math.max(...cands.map((c) => c.score));
     const top = cands.filter((c) => c.score === best);
     if (top.length === 1) return top[0];
@@ -1587,6 +1643,7 @@ var XRNav = (() => {
   var T = {
     zh: {
       noDest: (ex) => `\u8981\u53BB\u54EA\u91CC\uFF1F\u6BD4\u5982\uFF1A${ex}`,
+      guess: (name) => `\u4F60\u662F\u8BF4${name}\u5427\uFF1F`,
       notFound: (q, ex) => `\u5730\u56FE\u4E0A\u6CA1\u6709\u627E\u5230\u201C${q}\u201D\u3002\u53EF\u4EE5\u53BB\uFF1A${ex}`,
       ambiguous: (list) => `\u4F60\u8BF4\u7684\u662F${list.join("\uFF0C\u8FD8\u662F")}\uFF1F`,
       noStart: "\u6211\u8FD8\u4E0D\u77E5\u9053\u4F60\u73B0\u5728\u5728\u54EA\u3002\u8BF7\u8BF4\u4ECE\u54EA\u91CC\u51FA\u53D1\uFF0C\u6BD4\u5982\u201C\u4ECE\u5C71\u9876\u51FA\u53D1\u53BB\u9910\u5385\u201D\u3002",
@@ -1613,6 +1670,7 @@ var XRNav = (() => {
     },
     ja: {
       noDest: (ex) => `\u3069\u3053\u3078\u884C\u304D\u307E\u3059\u304B\uFF1F\u4F8B\u3048\u3070\uFF1A${ex}`,
+      guess: (name) => `${name}\u306E\u3053\u3068\uFF1F`,
       notFound: (q, ex) => `\u5730\u56F3\u306B\u300C${q}\u300D\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002\u884C\u3051\u308B\u5834\u6240\uFF1A${ex}`,
       ambiguous: (list) => `${list.join("\u3068")}\u306E\u3069\u3061\u3089\u3067\u3059\u304B\uFF1F`,
       noStart: "\u73FE\u5728\u5730\u304C\u307E\u3060\u308F\u304B\u308A\u307E\u305B\u3093\u3002\u300C\u5C71\u9802\u304B\u3089\u30EC\u30B9\u30C8\u30E9\u30F3\u3078\u300D\u306E\u3088\u3046\u306B\u51FA\u767A\u5730\u3092\u8A00\u3063\u3066\u304F\u3060\u3055\u3044\u3002",
@@ -1719,7 +1777,8 @@ var XRNav = (() => {
       prefs = want;
       pending = { ...start, goal, prefs: { ...p.prefs }, plan: p, fromLabel };
       mode = "confirming";
-      return say(summarize2(p, fromLabel, goal), { awaiting: true, planned: true });
+      const prefix = dest?.guess && intent.destination ? L.guess(placeName(goal)) : "";
+      return say(prefix + summarize2(p, fromLabel, goal), { awaiting: true, planned: true });
     }
     function say(text, extra = {}) {
       if (text) lastReply = text;

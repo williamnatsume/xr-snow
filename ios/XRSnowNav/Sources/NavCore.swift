@@ -113,6 +113,14 @@ final class NavCore {
             jsError = exc?.toString()
             NSLog("[NavCore] JS 异常：%@", exc?.toString() ?? "?")
         }
+        // 给 JS 用的“汉字 → 拼音”（地名模糊匹配按读音比较，语音识别写错字也能对上）
+        let pinyin: @convention(block) (String) -> String = { text in
+            let m = NSMutableString(string: text)
+            CFStringTransform(m, nil, kCFStringTransformMandarinLatin, false)
+            CFStringTransform(m, nil, kCFStringTransformStripDiacritics, false)
+            return m as String
+        }
+        ctx.setObject(pinyin, forKeyedSubscript: "XRPinyin" as NSString)
         ctx.evaluateScript(source, withSourceURL: url)
         if let e = jsError { throw NavCoreError.js(e) }
         guard let x = ctx.objectForKeyedSubscript("XRNav"), !x.isUndefined else { throw NavCoreError.js("找不到全局对象 XRNav") }
