@@ -86,9 +86,12 @@ struct SetupView: View {
                     Label(r.message, systemImage: r.passed ? "checkmark.circle.fill" : "xmark.octagon.fill")
                         .foregroundStyle(r.passed ? .green : .red)
                 }
+                ForEach(model.capabilities, id: \.self) { line in
+                    Text(line).font(.footnote).foregroundStyle(.secondary)
+                }
             }
         }
-        .navigationTitle("XR Snow 导航")
+        .navigationTitle("雪人")
     }
 
     @ViewBuilder private var placeOptions: some View {

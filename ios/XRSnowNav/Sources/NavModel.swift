@@ -43,6 +43,7 @@ final class NavModel {
     var status: String?
     var selfCheck: SelfCheckResult?
     var fatalError: String?
+    var capabilities: [String] = []
 
     private var core: NavCore?
     private var session: NavSession?
@@ -57,6 +58,7 @@ final class NavModel {
         location.onStatus = { [weak self] s in self?.status = s }
         loadResort()
         if ProcessInfo.processInfo.arguments.contains("-selfcheck") { runSelfCheck() }
+        Task { await checkCapabilities() }
     }
 
     var places: [Place] { info?.places ?? [] }
@@ -140,6 +142,11 @@ final class NavModel {
 
     func simWrongBranch() { session?.simWrongBranch() }
     func simOutage() { session?.simOutage(seconds: 12) }
+
+    func checkCapabilities() async {
+        capabilities = await DeviceCapabilities.report()
+        for line in capabilities { NSLog("[能力] %@", line) }
+    }
 
     func runSelfCheck() {
         guard let core else { return }

@@ -27,7 +27,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()   // 授权后在回调里开始
         case .denied, .restricted:
-            onStatus?("定位权限被拒绝：请在 设置 → 隐私与安全性 → 定位服务 → XR Snow 中允许")
+            onStatus?("定位权限被拒绝：请在 设置 → 隐私与安全性 → 定位服务 → 雪人 中允许")
         default:
             begin()
         }
@@ -54,7 +54,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         guard running else { return }
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways: begin()
-        case .denied, .restricted: onStatus?("定位权限被拒绝：请在 设置 → 隐私与安全性 → 定位服务 → XR Snow 中允许")
+        case .denied, .restricted: onStatus?("定位权限被拒绝：请在 设置 → 隐私与安全性 → 定位服务 → 雪人 中允许")
         default: break
         }
     }

@@ -138,6 +138,16 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - 后台长时间定位耗电大，低温下更明显：需要实测。
 - 神乐 OSM 数据未核实：开放状态全部未知，15 处连接为程序推算，みつまたロープウェイ未连通。
 
+### 方向调整（2026-11-04，用户提出）：“雪人” AI 滑雪伙伴
+
+- App 显示名改为 **雪人**（好喊；Bundle ID 不变）。
+- 目标：不用手指点，用说话告诉它去哪，它规划路线并语音确认，导航中可以随时问（还有多远、再说一遍、换条简单的路）。导航功能必须保证，AI 只负责理解意图，路线和转弯仍由规划器按地图决定。
+- 还需要“锁屏测试 / 轨迹记录”模式（M3 用，M4 上雪记录 GPX）。
+- **用户 iPhone（国行 iPhone 18 Pro Max，iOS 27.0.1，地区 JP）真机能力检查结果**（App 启动时写日志 `[能力]`）：
+  - 本机大模型（Foundation Models）：**不可用，deviceNotEligible**（国行机型限制；苹果据报道 12 月在国内上线 Apple Intelligence，但是否开放给第三方 App 未知）
+  - 旧版语音识别 SFSpeechRecognizer：zh-CN 仅联网，ja-JP 可离线
+  - 新版 SpeechTranscriber（iOS 26+）：zh-CN、ja-JP 模型**都已安装，可离线转写** → 语音输入用这个
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。
