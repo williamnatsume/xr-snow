@@ -16,7 +16,7 @@
 | 雪场语音导航 MVP（网页） | ✅ 模拟器可完整跑通；真实 GPS 在 iPhone 前台可用（未上雪实测） | `ski-nav.html`，线上 https://williamnatsume.github.io/xr-snow/ski-nav.html |
 | 雪场数据 | 虚构演示雪场 + 神乐（かぐら，OSM 导入，**未核实**） | `resorts/*.json`，导入脚本 `tools/import-osm.mjs` |
 | 自动测试 | ✅ 30 项全部通过（含 3 项 iOS 打包文件测试） | `npm test` |
-| 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。⬜ M2 真机（见第 4 节） | `ios/XRSnowNav` |
+| 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。🟡 M2 进行中：已装到用户的 iPhone 18 Pro Max（iOS 27.0.1），真机自检通过；语音与真实 GPS 待用户试用 | `ios/XRSnowNav` |
 | 硬件 | 0.23" Micro-OLED 光波导（Sony ECX336CN，640×400）经 HDMI 接电脑可显示；接 iPhone 蓝屏 | 见第 6 节 |
 
 运行网页版：
@@ -102,7 +102,7 @@ nav.snapshot(nowMs);                  // 界面用：state、nextText、distToNe
   - `LocationService.swift`：CoreLocation，后台定位 + `CLBackgroundActivitySession`。
   - `SpeechService.swift`：AVSpeechSynthesizer，`.playback` / `.voicePrompt` / duck。
   - `NavModel.swift`、`ContentView.swift`：设置 → 规划 → 导航（模拟器 1×/5×/20×、走错分支、定位中断；真实 GPS 需勾选“数据未核实”）。
-  - Bundle ID `io.github.williamnatsume.XRSnowNav`，签名团队为空：真机安装前在 Xcode → Signing & Capabilities 里选个人团队（用户操作）。
+  - Bundle ID `io.github.williamnatsume.XRSnowNav`。工程文件里签名团队**故意留空**（公开仓库不放个人团队 ID）：命令行编译时传 `DEVELOPMENT_TEAM=<团队 ID>`，团队 ID 用 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` 查。Xcode 界面里选了团队后，不要提交 project.pbxproj 里的这项改动。
 
 命令行编译检查（不需要签名）：
 
@@ -119,6 +119,17 @@ xcrun simctl install "$D" build/Build/Products/Debug-iphonesimulator/XRSnowNav.a
 xcrun simctl launch "$D" io.github.williamnatsume.XRSnowNav -selfcheck
 xcrun simctl spawn "$D" log show --last 1m --predicate 'process == "XRSnowNav" AND eventMessage CONTAINS "自检"'
 ```
+
+装到 iPhone（已配对、已开开发者模式；免费个人团队装的 App 7 天后过期，重装即可）：
+
+```bash
+UDID=$(xcrun devicectl list devices | awk '/physical/ {for(i=1;i<=NF;i++) if($i ~ /^[0-9A-F]{8}-[0-9A-F]{16}$/) print $i}' | head -1)
+cd ios/XRSnowNav && xcodebuild -project XRSnowNav.xcodeproj -scheme XRSnowNav -destination "id=$UDID" -derivedDataPath build-device -allowProvisioningUpdates DEVELOPMENT_TEAM=<团队 ID> build
+xcrun devicectl device install app --device $UDID build-device/Build/Products/Debug-iphoneos/XRSnowNav.app
+xcrun devicectl device process launch --device $UDID --terminate-existing --console io.github.williamnatsume.XRSnowNav -- -selfcheck
+```
+
+第一次安装后用户要在 iPhone 上：设置 → 通用 → VPN 与设备管理 → 信任开发者。
 
 小问题（未修）：到达后速度仍显示最后一次定位的速度。
 
