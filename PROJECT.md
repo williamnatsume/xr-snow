@@ -16,7 +16,7 @@
 | 雪场语音导航 MVP（网页） | ✅ 模拟器可完整跑通；真实 GPS 在 iPhone 前台可用（未上雪实测） | `ski-nav.html`，线上 https://williamnatsume.github.io/xr-snow/ski-nav.html |
 | 雪场数据 | 虚构演示雪场 + 神乐（かぐら，OSM 导入，**未核实**） | `resorts/*.json`，导入脚本 `tools/import-osm.mjs` |
 | 自动测试 | ✅ 30 项全部通过（含 3 项 iOS 打包文件测试） | `npm test` |
-| 原生 iOS App | 🟡 M1 进行中：工程可编译（iphoneos SDK，未签名）；模拟器运行与自检待验证（见第 4 节） | `ios/XRSnowNav` |
+| 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。⬜ M2 真机（见第 4 节） | `ios/XRSnowNav` |
 | 硬件 | 0.23" Micro-OLED 光波导（Sony ECX336CN，640×400）经 HDMI 接电脑可显示；接 iPhone 蓝屏 | 见第 6 节 |
 
 运行网页版：
@@ -109,6 +109,18 @@ nav.snapshot(nowMs);                  // 界面用：state、nextText、distToNe
 ```bash
 cd ios/XRSnowNav && xcodebuild -project XRSnowNav.xcodeproj -target XRSnowNav -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
 ```
+
+模拟器上跑 M1 自检（命令行，看日志里的 `[自检]`）：
+
+```bash
+D="iPhone 18 Pro Max"; xcrun simctl boot "$D"
+cd ios/XRSnowNav && xcodebuild -project XRSnowNav.xcodeproj -scheme XRSnowNav -destination "platform=iOS Simulator,name=$D" -derivedDataPath build build
+xcrun simctl install "$D" build/Build/Products/Debug-iphonesimulator/XRSnowNav.app
+xcrun simctl launch "$D" io.github.williamnatsume.XRSnowNav -selfcheck
+xcrun simctl spawn "$D" log show --last 1m --predicate 'process == "XRSnowNav" AND eventMessage CONTAINS "自检"'
+```
+
+小问题（未修）：到达后速度仍显示最后一次定位的速度。
 
 ### 已知风险
 - 免费个人团队下某些能力（如推送）不可用；Background Modes（定位、音频）应可用，如不行再升级付费账号。
