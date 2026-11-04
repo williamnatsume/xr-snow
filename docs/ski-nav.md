@@ -7,8 +7,9 @@
 ```bash
 cd "XR SNOW"
 npm start            # = node tools/serve.mjs，打开 http://localhost:8080/ski-nav.html
-npm test             # 27 项自动测试（node --test）
+npm test             # 30 项自动测试（node --test）
 npm run import:kagura   # 重新从 OSM 数据生成 resorts/kagura-osm.json
+npm install && npm run build:ios   # 打包导航核心给 iOS App（需要 esbuild，见 PROJECT.md 第 4 节）
 ```
 
 - 页面需要读取 `resorts/*.json`，所以要用本地服务器或 GitHub Pages 打开，直接双击 HTML 不行。

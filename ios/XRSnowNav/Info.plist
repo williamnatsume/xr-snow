@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>导航时需要您的位置，用来判断所在雪道并在岔口前语音提示。位置只在本机内存中使用，不会上传。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>锁屏或把手机放进口袋后，仍需要位置来继续语音导航。位置只在本机内存中使用，不会上传。</string>
+</dict>
+</plist>

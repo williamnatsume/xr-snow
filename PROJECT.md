@@ -2,7 +2,7 @@
 
 > 给接手的 Claude Code（包括 Mac 上的新会话）：**先完整读这份文件，再读 `docs/ski-nav.md`**。
 > 这个仓库是公开的（GitHub Pages），不要写入个人信息、账号、令牌或私人联系方式。
-> 最后更新：2026-11-04（由 Windows 上的 Claude Code 会话写成）
+> 最后更新：2026-11-04（Mac 上的 Claude Code 会话：环境装好，开始 M1）
 
 ## 0. 一句话
 
@@ -15,8 +15,8 @@
 | 速度 HUD（网页） | ✅ 可用。640×400、黑底透明；模拟 / GPX 回放 / GPS；轨迹记录导出 GPX | `speed-hud.html`，线上 https://williamnatsume.github.io/xr-snow/ |
 | 雪场语音导航 MVP（网页） | ✅ 模拟器可完整跑通；真实 GPS 在 iPhone 前台可用（未上雪实测） | `ski-nav.html`，线上 https://williamnatsume.github.io/xr-snow/ski-nav.html |
 | 雪场数据 | 虚构演示雪场 + 神乐（かぐら，OSM 导入，**未核实**） | `resorts/*.json`，导入脚本 `tools/import-osm.mjs` |
-| 自动测试 | ✅ 27 项全部通过 | `npm test` |
-| 原生 iOS App | ⬜ **下一步**（见第 4 节） | — |
+| 自动测试 | ✅ 30 项全部通过（含 3 项 iOS 打包文件测试） | `npm test` |
+| 原生 iOS App | 🟡 M1 进行中：工程可编译（iphoneos SDK，未签名）；模拟器运行与自检待验证（见第 4 节） | `ios/XRSnowNav` |
 | 硬件 | 0.23" Micro-OLED 光波导（Sony ECX336CN，640×400）经 HDMI 接电脑可显示；接 iPhone 蓝屏 | 见第 6 节 |
 
 运行网页版：
@@ -91,6 +91,25 @@ nav.snapshot(nowMs);                  // 界面用：state、nextText、distToNe
 3. **M3 锁屏**：锁屏、放进口袋、播放音乐的情况下，走路 / 开车实测能持续定位并按时播报；定位中断时正确进入“定位不可靠”。
 4. **M4 上雪**：神乐实测，同时记录 GPX（包含定位误差），回来分析并调整阈值。
 
+### 已实现（2026-11-04，Mac）
+
+- `nav/core-entry.js`：原生入口。`createSession(雪场 JSON 文本)` 返回会话对象，参数是普通值、返回值都是 JSON 字符串；播报进队列，原生层每次调用后 `drainSpeech()` 取走。另有 `scenarioTexts()`。
+- `nav/scenario.js`：无界面完整模拟（原来在 `tests/helpers.mjs` 里），测试和 App 自检共用。
+- `npm run build:ios`（`tools/build-ios.mjs`，用 esbuild）：生成 `ios/XRSnowNav/Resources/navcore.js`（IIFE，全局 `XRNav`），复制 `resorts/*.json`，并用源码跑 M1 场景生成 `selfcheck-expected.json`。**改了 `nav/` 或 `resorts/` 后要重跑并一起提交**；`tests/core-bundle.test.mjs` 会发现打包文件过期。
+- M1 场景（`tools/selfcheck.mjs`）：虚构雪场，山顶 → 山脚餐厅，中级以下，模拟器种子 3，共 12 条播报。
+- `ios/XRSnowNav`：Xcode 工程（文件夹同步组，`Sources/`、`Resources/` 里新增文件会自动加入，不用改工程文件），iOS 17+，SwiftUI。
+  - `NavCore.swift`：JSContext 载入 navcore.js；`runSelfCheck()` 按与测试相同的顺序逐秒模拟并对比期望序列。启动参数 `-selfcheck` 会在启动时自动自检并在日志输出 `[自检]`。
+  - `LocationService.swift`：CoreLocation，后台定位 + `CLBackgroundActivitySession`。
+  - `SpeechService.swift`：AVSpeechSynthesizer，`.playback` / `.voicePrompt` / duck。
+  - `NavModel.swift`、`ContentView.swift`：设置 → 规划 → 导航（模拟器 1×/5×/20×、走错分支、定位中断；真实 GPS 需勾选“数据未核实”）。
+  - Bundle ID `io.github.williamnatsume.XRSnowNav`，签名团队为空：真机安装前在 Xcode → Signing & Capabilities 里选个人团队（用户操作）。
+
+命令行编译检查（不需要签名）：
+
+```bash
+cd ios/XRSnowNav && xcodebuild -project XRSnowNav.xcodeproj -target XRSnowNav -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+```
+
 ### 已知风险
 - 免费个人团队下某些能力（如推送）不可用；Background Modes（定位、音频）应可用，如不行再升级付费账号。
 - 后台长时间定位耗电大，低温下更明显：需要实测。
@@ -134,6 +153,13 @@ cd xr-snow && npm test
 用数据线连接 → iPhone 上点“信任” → 设置 → 隐私与安全性 → 开发者模式 → 打开（会重启）。第一次装 App 后：设置 → 通用 → VPN 与设备管理 → 信任开发者。
 
 ### 5.5 然后开始第 4 节的 M1
+
+### 5.6 这台 Mac 的实际情况（2026-11-04 记录）
+- 原为 macOS 15.1.1，装不了 Xcode 27（需要 macOS 26.6 以上，iPhone 18 / iOS 27 真机需要 Xcode 27）→ 用户已升级到 **macOS 27.2**；现为 **Xcode 27.2**。
+- 终端账号是 `wly`（`$HOME` = `/Users/wly`），但 Claude Code 的工作文件夹是 `/Users/zhy`：仓库在 **`/Users/zhy/dev/xr-snow`**。命令里不要用 `~` 指代仓库位置。
+- Homebrew **没有装成**（安装脚本需要 sudo 密码，未完成）。Node 26 LTS 直接从 nodejs.org 解压到 `$HOME/.local/node`（已核对 SHA-256）；用前 `export PATH=$HOME/.local/node/bin:$PATH`。
+- Xcode 是用户在 App Store 里点“获取”装的；iOS 27.2 模拟器用 `xcodebuild -downloadPlatform iOS` 下载（约 8.3 GB）。
+- npm 11 默认不跑安装脚本：esbuild 会提示 postinstall 被跳过，但不影响使用（平台二进制已装上）。
 
 ## 6. 硬件备忘
 

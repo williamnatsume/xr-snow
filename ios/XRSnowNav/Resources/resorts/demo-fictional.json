@@ -1,0 +1,110 @@
+{
+  "schema": "xrsnow.resort/1",
+  "id": "demo-fictional",
+  "name": "虚构演示雪场",
+  "region": "虚构",
+  "dataStatus": "fictional",
+  "allowRealGps": false,
+  "disclaimer": "虚构演示雪场，不可用于真实导航。所有雪道、坐标、长度、难度和开放状态都是为了测试编造的，与任何真实雪场无关。",
+  "crs": { "type": "local-meters", "note": "x 向东、y 向北，单位米；原点任意，不对应任何经纬度" },
+  "provenance": { "source": "手工编写的虚构数据", "license": "随本项目", "retrieved": "2026-11-03" },
+  "attributeLegend": {
+    "demo": "演示属性（虚构）", "unknown": "未知", "osm": "来自 OSM，未核实",
+    "derived": "程序推算，未核实", "conflict": "数据矛盾", "verified": "已核实"
+  },
+  "nodes": [
+    { "id": "S",    "name": "山顶",       "kind": "lift-top",  "pos": [0, 2000],    "ele": 1800, "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "J1",   "name": "山顶岔口",   "kind": "junction",  "pos": [0, 1820],    "ele": 1770, "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "J2",   "name": "回头弯岔口", "kind": "junction",  "pos": [-420, 1250], "ele": 1500, "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "M",    "name": "山腰站",     "kind": "station",   "pos": [300, 1100],  "ele": 1450, "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "J3",   "name": "森林岔口",   "kind": "junction",  "pos": [250, 700],   "ele": 1250, "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "J4",   "name": "山脚汇合点", "kind": "junction",  "pos": [300, 200],   "ele": 950,  "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "B",    "name": "山脚缆车站", "kind": "station",   "pos": [350, 0],     "ele": 900,  "attr": { "pos": "demo", "ele": "demo" } },
+    { "id": "REST", "name": "山脚餐厅",   "kind": "poi",       "pos": [-250, 40],   "ele": 905,  "attr": { "pos": "demo", "ele": "demo" } }
+  ],
+  "edges": [
+    { "id": "R0", "type": "run", "ref": null, "name": "山顶出发道", "sign": "山顶出发道",
+      "from": "S", "to": "J1", "difficulty": 1, "open": true, "flat": false, "width_m": 40,
+      "geometry": [[0, 2000], [0, 1900], [0, 1820]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R1", "type": "run", "ref": "1", "name": "山脊线", "sign": "1 山脊线",
+      "from": "J1", "to": "J2", "difficulty": 2, "open": true, "flat": false, "width_m": 30,
+      "note": "末段有回头弯：先向南下滑，再折回向北，抵达回头弯岔口时行进方向朝北",
+      "geometry": [[0, 1820], [-60, 1770], [-160, 1690], [-280, 1580], [-380, 1460], [-450, 1340], [-480, 1220], [-470, 1130],
+                   [-445, 1095], [-415, 1100], [-400, 1130], [-405, 1180], [-420, 1250]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R2", "type": "run", "ref": "2", "name": "东坡线", "sign": "2 东坡线",
+      "from": "J1", "to": "M", "difficulty": 1, "open": true, "flat": false, "width_m": 40,
+      "geometry": [[0, 1820], [70, 1760], [180, 1640], [260, 1450], [300, 1250], [300, 1100]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R3", "type": "run", "ref": "3", "name": "林间连接道", "sign": "3 林间连接道",
+      "from": "J2", "to": "M", "difficulty": 1, "open": true, "flat": true, "width_m": 12,
+      "note": "平路，单板需要蹬行",
+      "geometry": [[-420, 1250], [-395, 1290], [-340, 1310], [-200, 1270], [0, 1200], [150, 1150], [300, 1100]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R4", "type": "run", "ref": "4", "name": "西沟线", "sign": "4 西沟线",
+      "from": "J2", "to": "REST", "difficulty": 3, "open": true, "flat": false, "width_m": 30,
+      "geometry": [[-420, 1250], [-450, 1290], [-520, 1310], [-600, 1250], [-640, 1100], [-600, 800], [-500, 500], [-380, 250], [-300, 120], [-250, 40]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R5", "type": "run", "ref": "5", "name": "中央线", "sign": "5 中央线",
+      "from": "M", "to": "J3", "difficulty": 2, "open": true, "flat": false, "width_m": 40,
+      "geometry": [[300, 1100], [290, 1000], [270, 850], [250, 700]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R6", "type": "run", "ref": "6", "name": "森林线A", "sign": "6 森林线A",
+      "from": "J3", "to": "J4", "difficulty": 1, "open": true, "flat": false, "width_m": 18,
+      "note": "与 7 号森林线B 平行，相距约 30 m",
+      "geometry": [[250, 700], [232, 650], [226, 550], [228, 450], [236, 350], [258, 260], [300, 200]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R7", "type": "run", "ref": "7", "name": "森林线B", "sign": "7 森林线B",
+      "from": "J3", "to": "J4", "difficulty": 2, "open": true, "flat": false, "width_m": 18,
+      "note": "与 6 号森林线A 平行，相距约 30 m",
+      "geometry": [[250, 700], [266, 650], [258, 550], [260, 450], [266, 350], [282, 265], [300, 200]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R8", "type": "run", "ref": "8", "name": "悬崖线", "sign": "8 悬崖线（关闭）",
+      "from": "J3", "to": "B", "difficulty": 4, "open": false, "flat": false, "width_m": 25,
+      "note": "关闭的雪道，路线规划禁止进入",
+      "geometry": [[250, 700], [330, 660], [420, 560], [470, 350], [430, 150], [350, 0]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R9", "type": "run", "ref": "9", "name": "山脚线", "sign": "9 山脚线",
+      "from": "J4", "to": "B", "difficulty": 1, "open": true, "flat": false, "width_m": 40,
+      "geometry": [[300, 200], [330, 100], [350, 0]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "R10", "type": "run", "ref": "10", "name": "餐厅连接道", "sign": "10 餐厅连接道",
+      "from": "J4", "to": "REST", "difficulty": 1, "open": true, "flat": true, "width_m": 15,
+      "note": "平路",
+      "geometry": [[300, 200], [200, 160], [50, 110], [-100, 70], [-250, 40]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "W1", "type": "connector", "ref": null, "name": "山脚步道", "sign": "山脚步道",
+      "from": "REST", "to": "B", "difficulty": 1, "open": true, "flat": true, "width_m": 8,
+      "note": "步行道，从餐厅走到缆车站",
+      "geometry": [[-250, 40], [0, 20], [200, 10], [350, 0]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "difficulty": "demo", "open": "demo", "flat": "demo" } },
+
+    { "id": "L1", "type": "lift", "ref": "1", "name": "一号缆车", "sign": "1 号缆车",
+      "from": "B", "to": "M", "liftType": "chair_lift", "liftTypeZh": "吊椅", "duration_min": 6, "open": true,
+      "geometry": [[350, 0], [300, 1100]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "open": "demo", "duration": "demo" } },
+
+    { "id": "L2", "type": "lift", "ref": "2", "name": "二号缆车", "sign": "2 号缆车",
+      "from": "M", "to": "S", "liftType": "chair_lift", "liftTypeZh": "吊椅", "duration_min": 7, "open": true,
+      "geometry": [[300, 1100], [0, 2000]],
+      "attr": { "name": "demo", "geometry": "demo", "direction": "demo", "open": "demo", "duration": "demo" } }
+  ],
+  "pois": [
+    { "id": "P_S",    "name": "山顶",       "node": "S",    "kind": "lift-top", "aliases": ["山顶站", "山上", "最上面", "顶上"] },
+    { "id": "P_M",    "name": "山腰站",     "node": "M",    "kind": "station",  "aliases": ["山腰", "半山腰", "中间站", "中站"] },
+    { "id": "P_REST", "name": "山脚餐厅",   "node": "REST", "kind": "restaurant", "aliases": ["餐厅", "食堂", "吃饭", "山脚"] },
+    { "id": "P_B",    "name": "山脚缆车站", "node": "B",    "kind": "station",  "aliases": ["缆车站", "山脚站", "坐缆车", "山脚"] }
+  ]
+}
