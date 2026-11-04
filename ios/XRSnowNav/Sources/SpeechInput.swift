@@ -48,6 +48,8 @@ final class SpeechInput {
     private var silenceTimer: Timer?
     private var commandStart: Date?
     private let audioClock = AudioClock()
+    private let audioGate = AudioGate()
+    private var reopenTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
     static func requestMicPermission() async -> Bool {
@@ -153,11 +155,34 @@ final class SpeechInput {
         running = false
     }
 
-    // 播报时静音输入（最多 seconds 秒，防止播报结束的回调没来时一直听不见）；恢复时丢掉期间的结果
+    // 播报时关掉收音：声音不进识别器。播报结束后再等 0.6 秒（扬声器余音）才打开；
+    // 最多 seconds 秒后自动打开（防止播报结束的回调没来时一直听不见）
     func mute(_ on: Bool, seconds: Double = 8) {
-        mutedUntil = on ? Date().addingTimeInterval(seconds) : Date().addingTimeInterval(0.35)
+        reopenTask?.cancel()
+        if on {
+            audioGate.isOpen = false
+            mutedUntil = Date().addingTimeInterval(seconds)
+            for l in lanes { l.reset() }
+            NSLog("[语音] 播报中，暂停收音（最多 %.0f 秒）", seconds)
+            reopenTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                self?.reopen("超时")
+            }
+        } else {
+            reopenTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+                self?.reopen("播报结束")
+            }
+        }
+    }
+
+    private func reopen(_ why: String) {
         for l in lanes { l.reset() }
-        NSLog("[语音] %@", on ? "播报中，暂停收音" : "播报结束，恢复收音")
+        mutedUntil = Date().addingTimeInterval(0.3)   // 再丢掉 0.3 秒内晚到的结果
+        audioGate.isOpen = true
+        NSLog("[语音] 恢复收音（%@）", why)
     }
 
     private func startEngine() throws {
@@ -166,9 +191,12 @@ final class SpeechInput {
         guard let outFormat = analyzerFormat, let conv = AVAudioConverter(from: inFormat, to: outFormat) else { return }
         let builders = lanes.map(\.builder)
         let clock = audioClock
+        let gate = audioGate
         // 在音频线程里转换一次格式，再送给每个语言的识别器（不碰主线程状态）
         input.installTap(onBus: 0, bufferSize: 2048, format: inFormat) { buffer, _ in
             clock.tick()
+            // 雪人说话时不把声音送进识别器（从源头挡住，否则识别结果晚到会把自己的话当成用户的）
+            guard gate.isOpen else { return }
             SpeechInput.convert(buffer, with: conv, to: outFormat, into: builders)
         }
         tapInstalled = true
@@ -275,6 +303,16 @@ final class SpeechInput {
         guard keep else { return }   // 旁边的人声：不交给上层
         NSLog("[语音] 一句话（停顿 %.1f 秒%@），选 %@：%@  [%@]", quiet, tooLong ? "，超过 7 秒强制结束" : "", lang, text, summary)
         onUtterance?(text, lang)
+    }
+}
+
+// 收音开关（主线程写，音频线程读）
+final class AudioGate: @unchecked Sendable {
+    private var open = true
+    private let lock = NSLock()
+    var isOpen: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return open }
+        set { lock.lock(); open = newValue; lock.unlock() }
     }
 }
 

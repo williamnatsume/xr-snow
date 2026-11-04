@@ -240,6 +240,29 @@ final class NavModel {
     // 同时听两种语言（iOS 最多 2 个识别器）：“我说的语言” + “第二语言”
     private var listenLangs: [String] { secondLang == talkLang ? [talkLang] : [talkLang, secondLang] }
 
+    // 识别结果和雪人最近说过的话大部分重合 → 是扬声器的回声
+    private var recentSpoken: [String] = []
+    private func rememberSpoken(_ text: String) {
+        recentSpoken.append(text)
+        if recentSpoken.count > 6 { recentSpoken.removeFirst() }
+    }
+
+    private func isEcho(_ text: String) -> Bool {
+        let t = Array(text.filter { !$0.isPunctuation && !$0.isWhitespace })
+        guard t.count >= 4 else { return false }
+        for r in recentSpoken {
+            let rs = String(r.filter { !$0.isPunctuation && !$0.isWhitespace })
+            var covered = 0
+            var i = 0
+            while i + 3 <= t.count {
+                if rs.contains(String(t[i..<i + 3])) { covered += 1 }
+                i += 1
+            }
+            if Double(covered) / Double(max(1, t.count - 2)) > 0.5 { return true }
+        }
+        return false
+    }
+
     private func restartListening() async {
         if input.running { await input.stop(); listening = false }
         await updateListening()
@@ -255,6 +278,7 @@ final class NavModel {
         let acked = wakeAcked
         wakeAcked = false
         guard let session else { return }
+        if isEcho(text) { NSLog("[回声] 是雪人自己刚说的话，忽略：%@", text); return }
         let stripped = session.stripWake(text)
         let woke = session.hasWake(text)
         guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
@@ -373,6 +397,7 @@ final class NavModel {
 
     private func reply(_ text: String, note: String? = nil) {
         chat.append(ChatLine(who: .xueren, text: text, note: note))
+        rememberSpoken(text)
         speech.speak(text, lang: SpeechService.languageOf(text, fallback: replyLang))
     }
 
@@ -528,7 +553,7 @@ final class NavModel {
             if item.key == "start" && cloudStartedNav { cloudStartedNav = false; continue }
             chat.append(ChatLine(who: .system, text: item.text, note: item.reason))
             NSLog("[播报] %@", item.text)
-            if item.voice && !paused { speech.speak(item.text, lang: lang) }
+            if item.voice && !paused { rememberSpoken(item.text); speech.speak(item.text, lang: lang) }
         }
         if chat.count > 200 { chat.removeFirst(chat.count - 200) }
     }
