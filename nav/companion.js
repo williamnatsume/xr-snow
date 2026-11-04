@@ -30,17 +30,27 @@ export const INTENT_SCHEMA = {
 };
 
 export const WAKE_WORDS = ['雪人', '雪だるま', 'ゆきだるま'];
+// 语音识别可能写成的同音字（实测会出现在句首、句中、句尾）
+const WAKE_RE = /(嘿|喂|哎)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま)[，,。.！!？?、\s]*/g;
 
 const EMPTY = { intent: 'unknown', destination: '', start: '', maxDifficulty: 0, avoidFlat: '', preferShort: '', reply: '' };
 
-// 去掉开头的唤醒词和语气词
+export function hasWake(text) {
+  WAKE_RE.lastIndex = 0;
+  return WAKE_RE.test(text || '');
+}
+
+// 去掉唤醒词（在句子任何位置）：“雪人，去山腰站” / “告诉我怎么走，雪人” / “雪人。雪人我想去餐厅”
 export function stripWake(text) {
-  let t = (text || '').trim();
-  for (const w of WAKE_WORDS) {
-    const i = t.indexOf(w);
-    if (i >= 0 && i <= 3) { t = t.slice(i + w.length); break; }
-  }
-  return t.replace(/^[\s，,。、！!？?呀啊喂嘿]+/, '').trim();
+  const t = (text || '').trim();
+  WAKE_RE.lastIndex = 0;
+  const parts = t.split(WAKE_RE).filter((x, i) => i % 3 === 0); // split 带捕获组：只取正文片段
+  const clean = (x) => x.replace(/^[\s，,。.、！!？?呀啊]+|[\s，,。.、]+$/g, '').trim();
+  const pieces = parts.map(clean).filter(Boolean);
+  if (!pieces.length) return '';
+  // 唤醒词之后说的才是命令；唤醒词在句尾时用前面的部分
+  const after = clean(parts[parts.length - 1]);
+  return after || pieces.join('，');
 }
 
 const RULES = [

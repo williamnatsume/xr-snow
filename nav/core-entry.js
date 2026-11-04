@@ -11,7 +11,7 @@ import { Navigator, STATE_ZH, UNRELIABLE_ZH } from './navigator.js';
 import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
-import { createCompanion, rulesIntent, brainSystemPrompt, INTENT_SCHEMA, stripWake, WAKE_WORDS } from './companion.js';
+import { createCompanion, rulesIntent, brainSystemPrompt, INTENT_SCHEMA, stripWake, hasWake, WAKE_WORDS } from './companion.js';
 
 export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH, createCompanion, rulesIntent, INTENT_SCHEMA, WAKE_WORDS };
 
@@ -147,6 +147,7 @@ export function createSession(resortJsonText) {
     // 一句话 → 意图（本地规则）。返回意图 JSON
     understandLocal(text) { return J(rulesIntent(text, resort)); },
     stripWake(text) { return stripWake(text); },
+    hasWake(text) { return hasWake(text); },
 
     // 给云端大模型的系统提示和输出格式
     brainPrompt() { return J({ system: brainSystemPrompt(resort, lang), schema: INTENT_SCHEMA }); },

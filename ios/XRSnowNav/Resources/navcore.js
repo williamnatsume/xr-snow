@@ -1487,17 +1487,21 @@ var XRNav = (() => {
     }
   };
   var WAKE_WORDS = ["\u96EA\u4EBA", "\u96EA\u3060\u308B\u307E", "\u3086\u304D\u3060\u308B\u307E"];
+  var WAKE_RE = /(嘿|喂|哎)?\s*(雪人|雪仁|血人|学人|薛人|穴人|雪だるま|ゆきだるま)[，,。.！!？?、\s]*/g;
   var EMPTY = { intent: "unknown", destination: "", start: "", maxDifficulty: 0, avoidFlat: "", preferShort: "", reply: "" };
+  function hasWake(text) {
+    WAKE_RE.lastIndex = 0;
+    return WAKE_RE.test(text || "");
+  }
   function stripWake(text) {
-    let t = (text || "").trim();
-    for (const w of WAKE_WORDS) {
-      const i = t.indexOf(w);
-      if (i >= 0 && i <= 3) {
-        t = t.slice(i + w.length);
-        break;
-      }
-    }
-    return t.replace(/^[\s，,。、！!？?呀啊喂嘿]+/, "").trim();
+    const t = (text || "").trim();
+    WAKE_RE.lastIndex = 0;
+    const parts = t.split(WAKE_RE).filter((x, i) => i % 3 === 0);
+    const clean = (x) => x.replace(/^[\s，,。.、！!？?呀啊]+|[\s，,。.、]+$/g, "").trim();
+    const pieces = parts.map(clean).filter(Boolean);
+    if (!pieces.length) return "";
+    const after = clean(parts[parts.length - 1]);
+    return after || pieces.join("\uFF0C");
   }
   var RULES = [
     // 顺序有意义：先匹配更具体的
@@ -1982,6 +1986,9 @@ var XRNav = (() => {
       },
       stripWake(text) {
         return stripWake(text);
+      },
+      hasWake(text) {
+        return hasWake(text);
       },
       // 给云端大模型的系统提示和输出格式
       brainPrompt() {

@@ -1,5 +1,5 @@
 // 语音输入：iOS 26 的 SpeechAnalyzer + SpeechTranscriber，本机离线识别中文 / 日语（用户 iPhone 实测已安装）。
-// 持续听：识别出的文字停顿约 1.2 秒后算一句话，交给 onUtterance。是否需要唤醒词由上层（NavModel）判断。
+// 持续听：识别出的文字停顿约 1.6 秒后算一句话，交给 onUtterance。是否需要唤醒词由上层（NavModel）判断。
 // 播报语音时调用 mute(true)，避免把自己的声音当成用户的话。
 // 麦克风用 iPhone 自带的（不用 AirPods 通话麦克风，否则蓝牙音乐会变成通话音质）。
 
@@ -79,6 +79,7 @@ final class SpeechInput {
             silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.checkSilence() }
             }
+            NSLog("[语音] 开始听：%@，输入格式 %@", locale.identifier, String(describing: analyzerFormat))
             onStatus?("正在听")
         } catch {
             NSLog("[语音] 启动失败：%@", String(describing: error))
@@ -139,6 +140,7 @@ final class SpeechInput {
     }
 
     private func handle(text: String, isFinal: Bool) {
+        NSLog("[语音] %@%@%@", isFinal ? "完整：" : "片段：", text, muted || Date() < mutedUntil ? "（播报中，忽略）" : "")
         if muted || Date() < mutedUntil { return }
         if isFinal { finalized += text; volatile = "" } else { volatile = text }
         lastChange = Date()
@@ -148,8 +150,9 @@ final class SpeechInput {
 
     private func checkSilence() {
         let all = (finalized + volatile).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !all.isEmpty, Date().timeIntervalSince(lastChange) > 1.2 else { return }
+        guard !all.isEmpty, Date().timeIntervalSince(lastChange) > 1.6 else { return }
         finalized = ""; volatile = ""
+        NSLog("[语音] 一句话：%@", all)
         onUtterance?(all)
     }
 }

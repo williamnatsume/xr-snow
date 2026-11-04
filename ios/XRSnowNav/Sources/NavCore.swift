@@ -241,6 +241,7 @@ final class NavSession {
     }
     func understandLocal(_ text: String) -> String { call("understandLocal", [text]) ?? "{\"intent\":\"unknown\"}" }
     func stripWake(_ text: String) -> String { call("stripWake", [text]) ?? text }
+    func hasWake(_ text: String) -> Bool { value.invokeMethod("hasWake", withArguments: [text])?.toBool() ?? false }
     func converse(intentJSON: String, nowMs: Double) -> ConverseResult {
         decode(ConverseResult.self, call("converse", [intentJSON, nowMs])) ?? ConverseResult(say: "导航核心出错", mode: "idle", awaiting: nil, event: nil)
     }

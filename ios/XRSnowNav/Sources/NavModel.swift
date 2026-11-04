@@ -94,7 +94,7 @@ final class NavModel {
         speech.onSpeaking = { [weak self] on in self?.input.mute(on) }
         input.onPartial = { [weak self] t in self?.partial = t }
         input.onUtterance = { [weak self] t in self?.heard(t) }
-        input.onStatus = { [weak self] s in self?.status = s }
+        input.onStatus = { [weak self] s in self?.status = s; NSLog("[语音状态] %@", s) }
         NotificationCenter.default.addObserver(forName: .xueRenListen, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.talkButton() }
         }
@@ -197,8 +197,8 @@ final class NavModel {
         partial = ""
         guard let session else { return }
         let stripped = session.stripWake(text)
-        let woke = stripped != text.trimmingCharacters(in: .whitespaces)
-        guard woke || Date() < commandWindowUntil else { return } // 没喊“雪人”的话不理会
+        let woke = session.hasWake(text)
+        guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
         if stripped.isEmpty {
             reply("我在。", note: "唤醒")
             openCommandWindow(seconds: 8)
@@ -237,8 +237,9 @@ final class NavModel {
         }
         flushSpeech()
         if !r.say.isEmpty { reply(r.say, note: via) }
-        // 问了“要出发吗？”：不用再喊雪人，直接回答
-        if r.awaiting == true { openCommandWindow(seconds: 12 + Double(r.say.count) / 4) }
+        // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了“要出发吗？”时更长）
+        let speakSec = Double(r.say.count) / 4
+        openCommandWindow(seconds: (r.awaiting == true ? 12 : 8) + speakSec)
         await updateListening()
         refresh()
     }

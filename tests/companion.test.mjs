@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, resort } from './helpers.mjs';
-import { rulesIntent, resolvePlace, stripWake, brainSystemPrompt } from '../nav/companion.js';
+import { rulesIntent, resolvePlace, stripWake, hasWake, brainSystemPrompt } from '../nav/companion.js';
 import { createSession } from '../nav/core-entry.js';
 
 const R = resort('demo-fictional');
@@ -23,6 +23,13 @@ test('唤醒词：去掉开头的“雪人”', () => {
   assert.equal(stripWake('雪人，去山腰站'), '去山腰站');
   assert.equal(stripWake('嘿雪人 还有多远'), '还有多远');
   assert.equal(stripWake('去山腰站'), '去山腰站');
+  // 真机实测的识别结果：唤醒词在句尾、重复、同音字
+  assert.equal(stripWake('告诉我怎么走雪人。'), '告诉我怎么走');
+  assert.equal(stripWake('雪人。雪人我想去餐厅'), '我想去餐厅');
+  assert.equal(stripWake('学人，还有多远'), '还有多远');
+  assert.equal(stripWake('雪人。'), '');
+  assert.ok(hasWake('告诉我怎么走雪人。'));
+  assert.ok(!hasWake('今天天气不错'));
 });
 
 test('本地规则：常见说法', () => {
