@@ -16,7 +16,7 @@
 | 雪场语音导航 MVP（网页） | ✅ 模拟器可完整跑通；真实 GPS 在 iPhone 前台可用（未上雪实测） | `ski-nav.html`，线上 https://williamnatsume.github.io/xr-snow/ski-nav.html |
 | 雪场数据 | 虚构演示雪场 + 神乐（かぐら，OSM 导入，**未核实**） | `resorts/*.json`，导入脚本 `tools/import-osm.mjs` |
 | 自动测试 | ✅ 30 项全部通过（含 3 项 iOS 打包文件测试） | `npm test` |
-| 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。🟡 M2 进行中：已装到用户的 iPhone 18 Pro Max（iOS 27.0.1），真机自检通过；语音与真实 GPS 待用户试用 | `ios/XRSnowNav` |
+| 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。🟡 M2 进行中：已装到用户的 iPhone 18 Pro Max（iOS 27.0.1），真机自检通过；用户确认模拟导航时能听到中文语音播报（2026-11-04）；真实 GPS 待户外试用 | `ios/XRSnowNav` |
 | 硬件 | 0.23" Micro-OLED 光波导（Sony ECX336CN，640×400）经 HDMI 接电脑可显示；接 iPhone 蓝屏 | 见第 6 节 |
 
 运行网页版：
