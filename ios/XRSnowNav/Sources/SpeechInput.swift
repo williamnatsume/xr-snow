@@ -1,5 +1,5 @@
 // 语音输入：iOS 26 的 SpeechAnalyzer + SpeechTranscriber，本机离线识别中文 / 日语（用户 iPhone 实测已安装）。
-// 持续听：识别出的文字停顿约 1.6 秒后算一句话，交给 onUtterance。是否需要唤醒词由上层（NavModel）判断。
+// 持续听：识别出的文字停顿 0.6 秒（命令已完整）或 1.4 秒后算一句话，交给 onUtterance。是否需要唤醒词由上层（NavModel）判断。
 // 播报语音时调用 mute(true)，避免把自己的声音当成用户的话。
 // 麦克风用 iPhone 自带的（不用 AirPods 通话麦克风，否则蓝牙音乐会变成通话音质）。
 
@@ -12,6 +12,8 @@ final class SpeechInput {
     var onUtterance: ((String) -> Void)?
     var onPartial: ((String) -> Void)?
     var onStatus: ((String) -> Void)?
+    // 这句话是否已经是完整的命令（能马上处理）。是 → 停顿 0.6 秒就算说完；否 → 等 1.4 秒
+    var isComplete: ((String) -> Bool)?
     private(set) var running = false
 
     private let engine = AVAudioEngine()
@@ -29,6 +31,7 @@ final class SpeechInput {
     private var mutedUntil = Date.distantPast
     private var silenceTimer: Timer?
     private var tapInstalled = false
+    private(set) var lastPartialAt = Date()
     private var locale = Locale(identifier: "zh-CN")
 
     static func requestMicPermission() async -> Bool {
@@ -49,7 +52,7 @@ final class SpeechInput {
         guard await Self.requestMicPermission() else { onStatus?("没有麦克风权限：请在 设置 → 雪人 中允许麦克风"); return }
         locale = Locale(identifier: lang == "ja" ? "ja-JP" : "zh-CN")
         do {
-            let t = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
+            let t = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults], attributeOptions: [])
             // 模型未安装时下载（用户 iPhone 上中日文已安装）
             if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) {
                 onStatus?("正在下载语音识别模型…")
@@ -146,13 +149,17 @@ final class SpeechInput {
         lastChange = Date()
         let all = (finalized + volatile).trimmingCharacters(in: .whitespaces)
         if !all.isEmpty { onPartial?(all) }
+        lastPartialAt = Date()
     }
 
     private func checkSilence() {
         let all = (finalized + volatile).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !all.isEmpty, Date().timeIntervalSince(lastChange) > 1.6 else { return }
+        guard !all.isEmpty else { return }
+        let quiet = Date().timeIntervalSince(lastChange)
+        let need = (isComplete?(all) ?? false) ? 0.6 : 1.4
+        guard quiet > need else { return }
         finalized = ""; volatile = ""
-        NSLog("[语音] 一句话：%@", all)
+        NSLog("[语音] 一句话（停顿 %.1f 秒后）：%@", quiet, all)
         onUtterance?(all)
     }
 }

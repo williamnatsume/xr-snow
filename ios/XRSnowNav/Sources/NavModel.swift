@@ -99,6 +99,7 @@ final class NavModel {
         location.onStatus = { [weak self] s in self?.status = s }
         speech.onSpeaking = { [weak self] on in self?.input.mute(on) }
         input.onPartial = { [weak self] t in self?.onPartial(t) }
+        input.isComplete = { [weak self] t in self?.looksComplete(t) ?? false }
         input.onUtterance = { [weak self] t in self?.heard(t) }
         input.onStatus = { [weak self] s in self?.status = s; NSLog("[语音状态] %@", s) }
         NotificationCenter.default.addObserver(forName: .xueRenListen, object: nil, queue: .main) { [weak self] _ in
@@ -214,6 +215,17 @@ final class NavModel {
         }
     }
 
+    // 唤醒词后的话已经能听懂（离线规则认得出意图）→ 不用再等
+    private func looksComplete(_ text: String) -> Bool {
+        guard let session else { return false }
+        let woke = session.hasWake(text)
+        guard woke || Date() < commandWindowUntil else { return false }
+        let cmd = session.stripWake(text)
+        if cmd.isEmpty { return false }
+        let intent = session.understandLocal(cmd)
+        return !intent.contains("\"intent\":\"unknown\"")
+    }
+
     private func heard(_ text: String) {
         partial = ""
         let acked = wakeAcked
@@ -234,6 +246,7 @@ final class NavModel {
 
     private func command(_ text: String) async {
         guard let session else { return }
+        let t0 = Date()
         chat.append(ChatLine(who: .user, text: text))
         configureSession()
         var say = ""
@@ -269,6 +282,7 @@ final class NavModel {
         if history.count > 16 { history.removeFirst(history.count - 16) }
 
         flushSpeech()
+        NSLog("[计时] 理解+回复用了 %.2f 秒（%@）", Date().timeIntervalSince(t0), via)
         if !say.isEmpty { reply(say, note: via) }
         // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了问题时更长）
         let speakSec = Double(say.count) / 4
