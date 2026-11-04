@@ -434,7 +434,7 @@ var XRNav = (() => {
     return e.type === "run" ? "\u65E0\u540D\u96EA\u9053" : "\u6B65\u9053";
   }
   var SIDE = {
-    zh: { left: "\u9760\u5DE6", right: "\u9760\u53F3", middle: "\u8D70\u4E2D\u95F4", unclear: "" },
+    zh: { left: "\u9760\u5DE6", right: "\u9760\u53F3", middle: "\u8D70\u4E2D\u95F4\u90A3\u6761", unclear: "" },
     ja: { left: "\u5DE6\u3078", right: "\u53F3\u3078", middle: "\u771F\u3093\u4E2D\u3078", unclear: "" }
   };
   function forkSide(inEdge, chosen, alternatives) {
@@ -502,6 +502,12 @@ var XRNav = (() => {
     for (const m of list) m.sameRun = !!(m.outEdge && m.inEdge && m.outEdge.name && m.outEdge.name === m.inEdge.name);
     return list;
   }
+  function pick(m, kind, variants) {
+    const key = `${m.id || ""}:${kind}`;
+    let h = 0;
+    for (const c of key) h = h * 31 + c.charCodeAt(0) >>> 0;
+    return variants[h % variants.length];
+  }
   function maneuverText(m, kind, { lang = "zh", distance = null } = {}) {
     const S = SIDE[lang] || SIDE.zh;
     const side = S[m.side] || "";
@@ -511,70 +517,71 @@ var XRNav = (() => {
     const thenOut = m.then ? spokenName(m.then.outEdge, lang) : "";
     if (lang === "ja") {
       m = { ...m, destName: m.destNameJa || m.destName };
-      const go2 = m.sameRun ? `${out}\u3092\u305D\u306E\u307E\u307E\u9032\u3093\u3067\u304F\u3060\u3055\u3044` : `${out}\u306B\u9032\u3093\u3067\u304F\u3060\u3055\u3044`;
-      const thenJa = m.then ? `\u3002\u7D9A\u3051\u3066${then}${thenOut}\u3078` : "";
+      const go2 = m.sameRun ? `${out}\u3092\u305D\u306E\u307E\u307E` : `${out}\u3078`;
+      const thenJa = m.then ? `\u3001\u3059\u3050${then}${thenOut}` : "";
       switch (m.type) {
         case "fork":
-          if (kind === "preview") return `\u304A\u3088\u305D${meters}\u30E1\u30FC\u30C8\u30EB\u5148\u3001\u5206\u5C90\u3067\u3059\u3002${side}${out}\u306B\u9032\u307F\u307E\u3059${thenJa}`;
-          if (kind === "late") return side ? `${side}\u3001${out}` : `${out}\u3078`;
-          if (kind === "confirm") return `${out}\u306B\u5165\u308A\u307E\u3057\u305F`;
-          return side ? `\u3053\u306E\u5148\u5206\u5C90\u3001${side}\u3001${go2}${thenJa}\u3002${m.destName}\u65B9\u9762\u3067\u3059` : `\u3053\u306E\u5148\u5206\u5C90\u3001\u6848\u5185\u677F\u306B\u5F93\u3063\u3066${go2}${thenJa}`;
+          if (kind === "preview") return side ? `${meters}\u30E1\u30FC\u30C8\u30EB\u304F\u3089\u3044\u5148\u3067\u5206\u5C90\u3002${side}\u3001${go2}\u306D${thenJa}` : `${meters}\u30E1\u30FC\u30C8\u30EB\u304F\u3089\u3044\u5148\u3067\u5206\u5C90\u3002\u6848\u5185\u677F\u306E${go2}\u306D${thenJa}`;
+          if (kind === "late") return side ? `${side}\u3001${out}\uFF01` : `${out}\uFF01`;
+          if (kind === "confirm") return pick(m, kind, [`OK\u3001${out}\u306B\u5165\u3063\u305F\u3088`, `\u3044\u3044\u306D\u3001${out}\u3060\u3088`, `${out}\u3001\u5408\u3063\u3066\u308B\u3088`]);
+          return side ? `\u5206\u5C90\u3060\u3088\u3001${side}\uFF01${go2}${thenJa}` : `\u5206\u5C90\u3060\u3088\u3001\u6848\u5185\u677F\u3092\u898B\u3066${go2}${thenJa}`;
         case "exit-lift":
-          if (kind === "confirm") return `${out}\u306B\u5165\u308A\u307E\u3057\u305F`;
-          return side ? `\u30EA\u30D5\u30C8\u3092\u964D\u308A\u305F\u3089\u3001${side}${out}\u306B\u9032\u3093\u3067\u304F\u3060\u3055\u3044` : `\u30EA\u30D5\u30C8\u3092\u964D\u308A\u305F\u3089\u3001${out}\u306B\u9032\u3093\u3067\u304F\u3060\u3055\u3044`;
+          if (kind === "confirm") return `OK\u3001${out}\u306B\u5165\u3063\u305F\u3088`;
+          return side ? `\u30EA\u30D5\u30C8\u964D\u308A\u305F\u3089${side}\u3001${out}\u306D` : `\u30EA\u30D5\u30C8\u964D\u308A\u305F\u3089${out}\u306D`;
         case "board-lift":
-          if (kind === "confirm") return `${out}\u306B\u4E57\u8ECA\u3057\u307E\u3057\u305F`;
-          if (kind === "preview") return `\u304A\u3088\u305D${meters}\u30E1\u30FC\u30C8\u30EB\u5148\u3067\u3001${out}\u306B\u4E57\u308A\u307E\u3059`;
-          return `\u3053\u306E\u5148\u3001${out}\u306B\u4E57\u3063\u3066\u304F\u3060\u3055\u3044`;
+          if (kind === "confirm") return pick(m, kind, [`${out}\u306B\u4E57\u3063\u305F\u306D\u3002\u3061\u3087\u3063\u3068\u4F11\u61A9\u3057\u3088\u3046`, `${out}\u3001\u4E57\u308C\u305F\u306D\u3002\u4E00\u606F\u3064\u3053\u3046`]);
+          if (kind === "preview") return `${meters}\u30E1\u30FC\u30C8\u30EB\u304F\u3089\u3044\u5148\u3067${out}\u306B\u4E57\u308B\u3088`;
+          return `\u3053\u3053\u3067${out}\u306B\u4E57\u308D\u3046`;
         case "arrive":
-          if (kind === "preview") return `\u307E\u3082\u306A\u304F${m.destName}\u306B\u5230\u7740\u3057\u307E\u3059`;
-          return `${m.destName}\u306B\u5230\u7740\u3057\u307E\u3057\u305F`;
+          if (kind === "preview") return `\u3082\u3046\u3059\u3050${m.destName}\u3060\u3088`;
+          return pick(m, kind, [`\u7740\u3044\u305F\uFF01${m.destName}\u3060\u3088`, `\u5230\u7740\u3001${m.destName}\uFF01`]);
         default:
           return "";
       }
     }
-    const go = m.sameRun ? `\u7EE7\u7EED\u8D70${out}` : `\u8FDB\u5165${out}`;
-    const thenZh = m.then ? `\uFF0C\u968F\u540E${then}\u8FDB\u5165${thenOut}` : "";
+    const go = m.sameRun ? `\u987A\u7740${out}\u63A5\u7740\u6ED1` : out;
+    const goNoSide = m.sameRun ? `\u987A\u7740${out}\u63A5\u7740\u6ED1` : `\u8D70${out}`;
+    const thenZh = m.then ? `\uFF0C\u7D27\u63A5\u7740${then}\uFF0C${thenOut}` : "";
     switch (m.type) {
       case "fork":
-        if (kind === "preview") return `\u7EA6${meters}\u7C73\u540E\u5206\u5C94\uFF0C${side}${go}${thenZh}`;
-        if (kind === "late") return side ? `${side}\uFF0C${out}` : `\u8FDB\u5165${out}`;
-        if (kind === "confirm") return `\u5DF2\u8FDB\u5165${out}`;
-        return side ? `\u524D\u65B9\u5206\u5C94${side}\uFF0C${go}${thenZh}\uFF0C\u524D\u5F80${m.destName}` : `\u524D\u65B9\u5206\u5C94\uFF0C\u8BF7\u6309\u8DEF\u724C${go}${thenZh}\uFF0C\u524D\u5F80${m.destName}`;
+        if (kind === "preview") return side ? `\u524D\u9762${meters}\u7C73\u6709\u4E2A\u5C94\u53E3\uFF0C\u5230\u65F6\u5019${side}\uFF0C${go}${thenZh}` : `\u524D\u9762${meters}\u7C73\u6709\u4E2A\u5C94\u53E3\uFF0C\u770B\u8DEF\u724C${goNoSide}${thenZh}`;
+        if (kind === "late") return side ? `${side}\uFF01${out}\uFF01` : `${out}\uFF01`;
+        if (kind === "confirm") return pick(m, kind, [`\u597D\u561E\uFF0C\u8FDB${out}\u4E86`, `\u5BF9\uFF0C\u5C31\u662F${out}`, `\u6F02\u4EAE\uFF0C${out}\u6CA1\u8D70\u9519`]);
+        return side ? `\u5C94\u53E3\u5230\u4E86\uFF0C${side}\uFF0C${go}${thenZh}` : `\u5C94\u53E3\u5230\u4E86\uFF0C\u770B\u8DEF\u724C${goNoSide}${thenZh}`;
       case "exit-lift":
-        if (kind === "confirm") return `\u5DF2\u8FDB\u5165${out}`;
-        return (side ? `\u4E0B\u7F06\u8F66\u540E${side}\uFF0C\u8FDB\u5165${out}` : `\u4E0B\u7F06\u8F66\u540E\u8FDB\u5165${out}`) + thenZh;
+        if (kind === "confirm") return `\u597D\u561E\uFF0C\u8FDB${out}\u4E86`;
+        return (side ? `\u4E0B\u4E86\u7F06\u8F66${side}\uFF0C\u8D70${out}` : `\u4E0B\u4E86\u7F06\u8F66\u8D70${out}`) + thenZh;
       case "board-lift":
-        if (kind === "confirm") return `\u5DF2\u4E58\u4E0A${out}`;
-        if (kind === "preview") return `\u7EA6${meters}\u7C73\u540E\u4E58\u5750${out}`;
-        return `\u524D\u65B9\u4E58\u5750${out}\uFF0C\u524D\u5F80${m.destName}`;
+        if (kind === "confirm") return pick(m, kind, [`\u5750\u4E0A${out}\u4E86\uFF0C\u6B47\u4F1A\u513F\u5427`, `\u4E0A${out}\u4E86\uFF0C\u5598\u53E3\u6C14`]);
+        if (kind === "preview") return `\u524D\u9762${meters}\u7C73\u5750${out}`;
+        return `\u5230\u4E86\uFF0C\u5750${out}`;
       case "arrive":
-        if (kind === "preview") return `\u5373\u5C06\u5230\u8FBE${m.destName}`;
-        return `\u5DF2\u5230\u8FBE${m.destName}`;
+        if (kind === "preview") return `\u5FEB\u5230${m.destName}\u5566`;
+        return pick(m, kind, [`\u5230\u5566\uFF0C${m.destName}\uFF01`, `${m.destName}\u5230\u4E86\uFF01`]);
       default:
         return "";
     }
   }
   var SYSTEM_TEXT = {
     zh: {
-      offRoute: "\u53EF\u80FD\u504F\u79BB\u8DEF\u7EBF\uFF0C\u8BF7\u5728\u5B89\u5168\u4F4D\u7F6E\u505C\u4E0B\u67E5\u770B\u5730\u56FE",
-      rerouted: "\u5DF2\u6309\u5F53\u524D\u6240\u5728\u96EA\u9053\u91CD\u65B0\u89C4\u5212\u8DEF\u7EBF",
-      noReroute: "\u4ECE\u5F53\u524D\u96EA\u9053\u65E0\u6CD5\u6309\u8BBE\u5B9A\u6761\u4EF6\u5230\u8FBE\u76EE\u7684\u5730\uFF0C\u8BF7\u5728\u5B89\u5168\u4F4D\u7F6E\u505C\u4E0B\u67E5\u770B\u5730\u56FE",
-      gpsLost: "\u5B9A\u4F4D\u4FE1\u53F7\u4E2D\u65AD\uFF0C\u6682\u505C\u8F6C\u5F2F\u63D0\u793A",
-      gpsWeak: "\u5B9A\u4F4D\u7CBE\u5EA6\u4E0D\u8DB3\uFF0C\u6682\u505C\u8F6C\u5F2F\u63D0\u793A",
-      gpsBack: "\u5B9A\u4F4D\u5DF2\u6062\u590D",
-      ambiguous: "\u6682\u65F6\u65E0\u6CD5\u786E\u5B9A\u6240\u5728\u96EA\u9053\uFF0C\u8BF7\u7559\u610F\u8DEF\u724C",
-      start: (dest) => `\u5F00\u59CB\u5BFC\u822A\uFF0C\u524D\u5F80${dest}`
+      offRoute: "\u8BF6\uFF0C\u597D\u50CF\u8D70\u504F\u4E86\u3002\u5148\u627E\u4E2A\u5B89\u5168\u7684\u5730\u65B9\u505C\u4E00\u4E0B\uFF0C\u770B\u770B\u5730\u56FE",
+      rerouted: "\u6CA1\u4E8B\uFF0C\u6362\u6761\u8DEF\uFF0C\u4ECE\u4F60\u73B0\u5728\u8FD9\u6761\u9053\u63A5\u7740\u8D70",
+      noReroute: "\u4ECE\u8FD9\u6761\u9053\u8FC7\u4E0D\u53BB\u4E86\uFF0C\u5148\u627E\u4E2A\u5B89\u5168\u7684\u5730\u65B9\u505C\u4E00\u4E0B\uFF0C\u770B\u770B\u5730\u56FE",
+      gpsLost: "\u4FE1\u53F7\u4E22\u4E86\uFF0C\u8F6C\u5F2F\u5148\u4E0D\u62A5\uFF0C\u7559\u610F\u8DEF\u724C",
+      gpsWeak: "\u5B9A\u4F4D\u4E0D\u592A\u51C6\uFF0C\u8F6C\u5F2F\u5148\u4E0D\u62A5\uFF0C\u7559\u610F\u8DEF\u724C",
+      gpsBack: "\u4FE1\u53F7\u56DE\u6765\u4E86",
+      ambiguous: "\u6211\u5206\u4E0D\u6E05\u4F60\u5728\u54EA\u6761\u9053\u4E0A\uFF0C\u7559\u610F\u4E00\u4E0B\u8DEF\u724C",
+      start: (dest) => `\u51FA\u53D1\uFF01\u53BB${dest}\uFF0C\u8DDF\u7740\u6211`
     },
     ja: {
-      offRoute: "\u30EB\u30FC\u30C8\u3092\u5916\u308C\u305F\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002\u5B89\u5168\u306A\u5834\u6240\u3067\u6B62\u307E\u3063\u3066\u5730\u56F3\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
-      rerouted: "\u73FE\u5728\u306E\u30B3\u30FC\u30B9\u304B\u3089\u30EB\u30FC\u30C8\u3092\u518D\u8A08\u7B97\u3057\u307E\u3057\u305F",
-      noReroute: "\u73FE\u5728\u306E\u30B3\u30FC\u30B9\u304B\u3089\u6761\u4EF6\u306B\u5408\u3046\u30EB\u30FC\u30C8\u304C\u3042\u308A\u307E\u305B\u3093\u3002\u5B89\u5168\u306A\u5834\u6240\u3067\u6B62\u307E\u3063\u3066\u5730\u56F3\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
-      gpsLost: "\u4F4D\u7F6E\u60C5\u5831\u304C\u9014\u5207\u308C\u307E\u3057\u305F\u3002\u5206\u5C90\u6848\u5185\u3092\u4E00\u6642\u505C\u6B62\u3057\u307E\u3059",
-      gpsWeak: "\u4F4D\u7F6E\u306E\u7CBE\u5EA6\u304C\u4F4E\u3044\u305F\u3081\u3001\u5206\u5C90\u6848\u5185\u3092\u4E00\u6642\u505C\u6B62\u3057\u307E\u3059",
-      gpsBack: "\u4F4D\u7F6E\u60C5\u5831\u304C\u56DE\u5FA9\u3057\u307E\u3057\u305F",
-      ambiguous: "\u73FE\u5728\u306E\u30B3\u30FC\u30B9\u3092\u7279\u5B9A\u3067\u304D\u307E\u305B\u3093\u3002\u6848\u5185\u677F\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044",
-      start: (dest) => `${dest}\u3078\u306E\u6848\u5185\u3092\u958B\u59CB\u3057\u307E\u3059`
+      offRoute: "\u3042\u308C\u3001\u30EB\u30FC\u30C8\u304B\u3089\u5916\u308C\u305F\u304B\u3082\u3002\u5B89\u5168\u306A\u6240\u3067\u6B62\u307E\u3063\u3066\u5730\u56F3\u3092\u898B\u3088\u3046",
+      rerouted: "\u5927\u4E08\u592B\u3001\u4ECA\u306E\u30B3\u30FC\u30B9\u304B\u3089\u30EB\u30FC\u30C8\u3092\u5909\u3048\u305F\u3088",
+      noReroute: "\u3053\u306E\u30B3\u30FC\u30B9\u304B\u3089\u306F\u884C\u3051\u306A\u3044\u307F\u305F\u3044\u3002\u5B89\u5168\u306A\u6240\u3067\u6B62\u307E\u3063\u3066\u5730\u56F3\u3092\u898B\u3088\u3046",
+      gpsLost: "\u4F4D\u7F6E\u304C\u53D6\u308C\u306A\u3044\u3002\u5206\u5C90\u306E\u6848\u5185\u306F\u6B62\u3081\u308B\u306D\u3001\u6848\u5185\u677F\u3092\u898B\u3066",
+      gpsWeak: "\u4F4D\u7F6E\u304C\u3042\u3044\u307E\u3044\u3002\u5206\u5C90\u306E\u6848\u5185\u306F\u6B62\u3081\u308B\u306D\u3001\u6848\u5185\u677F\u3092\u898B\u3066",
+      gpsBack: "\u4F4D\u7F6E\u3001\u623B\u3063\u305F\u3088",
+      ambiguous: "\u3069\u306E\u30B3\u30FC\u30B9\u306B\u3044\u308B\u304B\u5206\u304B\u3089\u306A\u3044\u3002\u6848\u5185\u677F\u3092\u898B\u3066\u306D",
+      start: (dest) => `\u51FA\u767A\uFF01${dest}\u307E\u3067\u3001\u3064\u3044\u3066\u304D\u3066`
     }
   };
 

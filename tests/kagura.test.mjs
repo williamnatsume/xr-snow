@@ -45,7 +45,7 @@ test('神乐：日语播报模板', async () => {
   const p = planRoute(K, { startNode: a.node, goalNode: b.node }, { maxDifficulty: 2 });
   const ms = buildManeuvers(K, p.edges, b.node).filter((m) => m.announce && m.type === 'fork');
   const ja = ms.map((m) => maneuverText(m, 'main', { lang: 'ja' }));
-  assert.ok(ja.every((x) => /^この先分岐/.test(x)), ja.join('\n'));
+  assert.ok(ja.every((x) => /^分岐だよ/.test(x)), ja.join('\n'));
   assert.ok(ja.some((x) => x.includes('かぐらメインゲレンデ')));
 });
 

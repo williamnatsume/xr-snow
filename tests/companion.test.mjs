@@ -70,7 +70,7 @@ test('对话：说目的地 → 复述路线并询问 → 确认后开始导航'
   const b = talk('好的');
   assert.equal(b.event, 'started');
   assert.equal(b.mode, 'navigating');
-  assert.match(JSON.parse(s.drainSpeech())[0].text, /开始导航，前往山脚餐厅/);
+  assert.match(JSON.parse(s.drainSpeech())[0].text, /出发！去山脚餐厅/);
   run(60);
   const d = talk('还有多远');
   assert.match(d.say, /米|公里/);

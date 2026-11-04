@@ -1,56 +1,69 @@
-// 语音输入：iOS 26 的 SpeechAnalyzer + SpeechTranscriber，本机离线识别。
-// 两种语言的识别器同时听同一路麦克风（iOS 最多允许 2 个），每句话取“置信度”最高的那种语言的结果。
-// 默认中文 + 日语，第二语言可在设置里换成英语。
-// 一句话的结束：停顿 0.6 秒（命令已完整）或 1.4 秒；喊了“雪人”之后最多再听 7 秒。
-// 播报语音时静音输入，且静音有最长时限（防止播报结束回调没来时一直听不见）。
-// 音频被打断（来电、Siri、系统语音会话等）或 2 秒收不到声音时自动重启麦克风。
+// 语音对话的音频管线（听 + 说），按专业语音助手的做法：
+//
+// 1. 回声消除：麦克风开启 iOS 语音处理（AEC + 降噪 + 自动增益，和通话 / FaceTime 同一套），
+//    雪人的声音也从同一个 AVAudioEngine 播出，系统知道自己放了什么，会从麦克风里减掉 →
+//    雪人不会把自己的话当成用户说的；用户可以在她说话时插话（喊“雪人”会打断她）。
+// 2. 按音频时间切句：每个识别出的词都带音频时间。一句话交给上层后，记下它结束的时间，
+//    之后识别器重发的、时间更早的词一律丢掉 → 不会重复。
+// 3. 两种语言同时识别（iOS 最多 2 个识别器），每句话取置信度最高的。
+// 4. 一句话的结束：停顿 0.6 秒（命令已完整）或 1.4 秒；喊了“雪人”之后最多再听 7 秒。
+// 5. 音频被打断 / 配置变化 / 2 秒没声音 → 自动重启麦克风。
 // 麦克风用 iPhone 自带的（不用 AirPods 通话麦克风，否则蓝牙音乐会变成通话音质）。
 
 import Foundation
 import AVFoundation
+import CoreMedia
 import Speech
 
 @MainActor
-final class SpeechInput {
+final class SpeechInput: NSObject {
     var onUtterance: ((String, String) -> Void)?    // (文字, 语言 zh/ja/en)
     var onPartial: ((String) -> Void)?
     var onStatus: ((String) -> Void)?
+    var onSpeakingChanged: ((Bool) -> Void)?
     // 这句话是否已经是完整的命令（能马上处理）
     var isComplete: ((String) -> Bool)?
-    // 这段文字值不值得留着（喊过雪人 / 正在等命令）。不值得的说完就丢，免得旁边的人声把命令淹没
+    // 这段文字值不值得留着（喊过雪人 / 正在等命令）
     var shouldKeep: ((String) -> Bool)?
+    // 是否含唤醒词（说话时插话用）
+    var hasWake: ((String) -> Bool)?
     private(set) var running = false
     private(set) var langs: [String] = []
+    private(set) var echoCancel = false
+    private(set) var speaking = false
+
+    // 一个识别出的片段：文字 + 在音频里的时间（秒）
+    private struct Seg { let text: String; let start: Double; let end: Double; let conf: Double? }
 
     private final class Lane {
         let lang: String
         let analyzer: SpeechAnalyzer
         let builder: AsyncStream<AnalyzerInput>.Continuation
         var task: Task<Void, Never>?
-        var finalized = ""
-        var volatile = ""
-        var confSum = 0.0
-        var confCount = 0
+        var finals: [Seg] = []
+        var volatile: [Seg] = []
         init(lang: String, analyzer: SpeechAnalyzer, builder: AsyncStream<AnalyzerInput>.Continuation) {
             self.lang = lang; self.analyzer = analyzer; self.builder = builder
         }
-        var text: String { (finalized + volatile).trimmingCharacters(in: .whitespacesAndNewlines) }
-        var confidence: Double { confCount > 0 ? confSum / Double(confCount) : 0 }
-        func reset() { finalized = ""; volatile = ""; confSum = 0; confCount = 0 }
     }
 
     private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private let synth = AVSpeechSynthesizer()
+    private let playFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
     private var lanes: [Lane] = []
     private var analyzerFormat: AVAudioFormat?
     private var tapInstalled = false
+    private var playerAttached = false
     private var lastChange = Date()
-    private var mutedUntil = Date.distantPast
+    private var consumedUntil = 0.0          // 已交给上层的音频时间（秒），之前的词都丢掉
     private var silenceTimer: Timer?
     private var commandStart: Date?
     private let audioClock = AudioClock()
-    private let audioGate = AudioGate()
-    private var reopenTask: Task<Void, Never>?
+    private let audioGate = AudioGate()       // 没有回声消除时的退路：说话时不送声音
     private var observers: [NSObjectProtocol] = []
+    private var pendingUtterances = 0
+    private var speakGeneration = 0
 
     static func requestMicPermission() async -> Bool {
         await AVAudioApplication.requestRecordPermission()
@@ -76,11 +89,15 @@ final class SpeechInput {
     private func startListening(langs wanted: [String]) async {
         guard await Self.requestMicPermission() else { onStatus?("没有麦克风权限：请在 设置 → 雪人 中允许麦克风"); return }
         do {
+            let s = AVAudioSession.sharedInstance()
+            try s.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker])
+            try s.setActive(true)
+
             var transcribers: [(String, SpeechTranscriber)] = []
             for lang in wanted {
                 let t = SpeechTranscriber(locale: Self.locale(lang), transcriptionOptions: [],
                                           reportingOptions: [.volatileResults, .fastResults],
-                                          attributeOptions: [.transcriptionConfidence])
+                                          attributeOptions: [.transcriptionConfidence, .audioTimeRange])
                 if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) {
                     onStatus?("正在下载\(lang)语音识别模型…")
                     do { try await req.downloadAndInstall() } catch {
@@ -91,12 +108,11 @@ final class SpeechInput {
                 transcribers.append((lang, t))
             }
             guard !transcribers.isEmpty else { onStatus?("没有可用的语音识别模型"); return }
-            let fmt = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: transcribers.map { $0.1 })
-            analyzerFormat = fmt
+            analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: transcribers.map { $0.1 })
 
-            // 每种语言一个 SpeechAnalyzer。iOS 限制同时最多 2 个识别器（真机实测：第 3 个报
-            // “Maximum number of recognizers reached”，放进同一个 analyzer 也一样），所以最多两种语言。
+            // iOS 限制同时最多 2 个识别器（第 3 个报“Maximum number of recognizers reached”，真机实测）
             lanes = []
+            consumedUntil = 0
             for (lang, t) in transcribers.prefix(2) {
                 let a = SpeechAnalyzer(modules: [t])
                 let (stream, builder) = AsyncStream<AnalyzerInput>.makeStream()
@@ -104,15 +120,20 @@ final class SpeechInput {
                 lane.task = Task { [weak self, weak lane] in
                     do {
                         for try await r in t.results {
-                            let text = String(r.text.characters)
-                            var sum = 0.0, n = 0
+                            var segs: [Seg] = []
                             for run in r.text.runs {
-                                if let c = run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self] { sum += c; n += 1 }
+                                let piece = String(r.text[run.range].characters)
+                                guard !piece.isEmpty else { continue }
+                                let tr = run[AttributeScopes.SpeechAttributes.TimeRangeAttribute.self]
+                                let start = tr.map { CMTimeGetSeconds($0.start) } ?? .greatestFiniteMagnitude
+                                let end = tr.map { CMTimeGetSeconds(CMTimeRangeGetEnd($0)) } ?? .greatestFiniteMagnitude
+                                segs.append(Seg(text: piece, start: start, end: end,
+                                                conf: run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self]))
                             }
                             let isFinal = r.isFinal
                             await MainActor.run {
                                 guard let self, let lane else { return }
-                                self.handle(lane: lane, text: text, isFinal: isFinal, conf: n > 0 ? sum / Double(n) : nil)
+                                self.handle(lane: lane, segs: segs, isFinal: isFinal)
                             }
                         }
                     } catch {
@@ -127,10 +148,10 @@ final class SpeechInput {
             try startEngine()
             observeAudioSession()
             running = true
-            silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tick() }
             }
-            NSLog("[语音] 开始听：%@，输入格式 %@", langs.joined(separator: "+"), String(describing: analyzerFormat))
+            NSLog("[语音] 开始听：%@，回声消除：%@", langs.joined(separator: "+"), echoCancel ? "开" : "关（改用说话时不收音）")
             onStatus?("正在听（\(langs.joined(separator: "/"))）")
         } catch {
             NSLog("[语音] 启动失败：%@", String(describing: error))
@@ -140,6 +161,7 @@ final class SpeechInput {
     }
 
     func stop() async {
+        stopSpeaking()
         silenceTimer?.invalidate(); silenceTimer = nil
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
@@ -155,38 +177,25 @@ final class SpeechInput {
         running = false
     }
 
-    // 播报时关掉收音：声音不进识别器。播报结束后再等 0.6 秒（扬声器余音）才打开；
-    // 最多 seconds 秒后自动打开（防止播报结束的回调没来时一直听不见）
-    func mute(_ on: Bool, seconds: Double = 8) {
-        reopenTask?.cancel()
-        if on {
-            audioGate.isOpen = false
-            mutedUntil = Date().addingTimeInterval(seconds)
-            for l in lanes { l.reset() }
-            NSLog("[语音] 播报中，暂停收音（最多 %.0f 秒）", seconds)
-            reopenTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(seconds))
-                guard !Task.isCancelled else { return }
-                self?.reopen("超时")
-            }
-        } else {
-            reopenTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(600))
-                guard !Task.isCancelled else { return }
-                self?.reopen("播报结束")
-            }
-        }
-    }
-
-    private func reopen(_ why: String) {
-        for l in lanes { l.reset() }
-        mutedUntil = Date().addingTimeInterval(0.3)   // 再丢掉 0.3 秒内晚到的结果
-        audioGate.isOpen = true
-        NSLog("[语音] 恢复收音（%@）", why)
-    }
+    // MARK: - 引擎
 
     private func startEngine() throws {
         let input = engine.inputNode
+        // 回声消除 + 降噪；其他 App 的音乐只轻微压低
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: true, duckingLevel: .min)
+            echoCancel = true
+        } catch {
+            NSLog("[语音] 回声消除不可用：%@", error.localizedDescription)
+            echoCancel = false
+        }
+        if !playerAttached {
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+            playerAttached = true
+        }
         let inFormat = input.outputFormat(forBus: 0)
         guard let outFormat = analyzerFormat, let conv = AVAudioConverter(from: inFormat, to: outFormat) else { return }
         let builders = lanes.map(\.builder)
@@ -195,7 +204,6 @@ final class SpeechInput {
         // 在音频线程里转换一次格式，再送给每个语言的识别器（不碰主线程状态）
         input.installTap(onBus: 0, bufferSize: 2048, format: inFormat) { buffer, _ in
             clock.tick()
-            // 雪人说话时不把声音送进识别器（从源头挡住，否则识别结果晚到会把自己的话当成用户的）
             guard gate.isOpen else { return }
             SpeechInput.convert(buffer, with: conv, to: outFormat, into: builders)
         }
@@ -234,9 +242,14 @@ final class SpeechInput {
 
     nonisolated private static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to outFormat: AVAudioFormat,
                                             into builders: [AsyncStream<AnalyzerInput>.Continuation]) {
+        guard let out = convertBuffer(buffer, with: converter, to: outFormat) else { return }
+        for b in builders { b.yield(AnalyzerInput(buffer: out)) }
+    }
+
+    nonisolated private static func convertBuffer(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to outFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
         let ratio = outFormat.sampleRate / buffer.format.sampleRate
         let cap = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
-        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: cap) else { return }
+        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: cap) else { return nil }
         var consumed = false
         var err: NSError?
         converter.convert(to: out, error: &err) { _, status in
@@ -245,26 +258,119 @@ final class SpeechInput {
             status.pointee = .haveData
             return buffer
         }
-        guard err == nil && out.frameLength > 0 else { return }
-        for b in builders { b.yield(AnalyzerInput(buffer: out)) }
+        return err == nil && out.frameLength > 0 ? out : nil
     }
 
-    private func handle(lane: Lane, text: String, isFinal: Bool, conf: Double?) {
-        if Date() < mutedUntil { return }
-        if let conf { lane.confSum += conf; lane.confCount += 1 }
-        if isFinal {
-            let keep = shouldKeep?(lane.finalized + text) ?? true
-            lane.finalized = keep ? lane.finalized + text : ""
-            lane.volatile = ""
-            if !keep { lane.confSum = 0; lane.confCount = 0 }
-        } else {
-            lane.volatile = text
+    // MARK: - 说话（从同一个引擎播出，回声消除才认得出来）
+
+    func speak(_ text: String, voice: AVSpeechSynthesisVoice?) {
+        guard running, !text.isEmpty else { return }
+        let u = AVSpeechUtterance(string: text)
+        u.voice = voice
+        u.rate = AVSpeechUtteranceDefaultSpeechRate
+        setSpeaking(true)
+        pendingUtterances += 1
+        let gen = speakGeneration
+        if !player.isPlaying { player.play() }
+        var converter: AVAudioConverter?
+        var chunks = 0
+        let fmt = playFormat
+        let p = player
+        // 保险：预计时长 + 3 秒还没说完，就当说完了（防止合成回调没来时一直处于“说话中”）
+        let est = Double(text.count) / 4 + 3
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(est))
+            guard let self, gen == self.speakGeneration, self.pendingUtterances > 0 else { return }
+            NSLog("[语音] 播报超时，强制结束")
+            self.utteranceDone(gen, force: true)
         }
+        synth.write(u) { [weak self] buf in
+            guard let pcm = buf as? AVAudioPCMBuffer else { return }
+            if pcm.frameLength == 0 {
+                // 这句话合成完了：等最后一段播完再算说完
+                NSLog("[语音] 合成完成：%d 段", chunks)
+                p.scheduleBuffer(AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: 1)!) {
+                    Task { @MainActor in self?.utteranceDone(gen) }
+                }
+                return
+            }
+            if converter == nil {
+                converter = AVAudioConverter(from: pcm.format, to: fmt)
+                NSLog("[语音] 合成格式：%@ → 播放格式：%@", String(describing: pcm.format), String(describing: fmt))
+            }
+            guard let c = converter, let out = SpeechInput.convertBuffer(pcm, with: c, to: fmt) else { return }
+            chunks += 1
+            p.scheduleBuffer(out)
+        }
+    }
+
+    func stopSpeaking() {
+        guard speaking || pendingUtterances > 0 else { return }
+        speakGeneration += 1
+        synth.stopSpeaking(at: .immediate)
+        player.stop()
+        pendingUtterances = 0
+        setSpeaking(false)
+    }
+
+    private func utteranceDone(_ gen: Int, force: Bool = false) {
+        guard gen == speakGeneration else { return }
+        pendingUtterances = force ? 0 : max(0, pendingUtterances - 1)
+        if pendingUtterances == 0 { setSpeaking(false) }
+    }
+
+    private func setSpeaking(_ on: Bool) {
+        guard on != speaking else { return }
+        speaking = on
+        if !echoCancel {
+            // 没有回声消除：说话时不收音，说完 0.6 秒后再收
+            if on { audioGate.isOpen = false } else {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    if !self.speaking { self.audioGate.isOpen = true }
+                }
+            }
+        }
+        NSLog("[语音] %@", on ? "雪人开始说话" : "雪人说完了")
+        onSpeakingChanged?(on)
+    }
+
+    // MARK: - 识别结果
+
+    private func laneText(_ l: Lane) -> String {
+        (l.finals + l.volatile).filter { $0.end > consumedUntil }.map(\.text).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func laneConfidence(_ l: Lane) -> Double {
+        let c = (l.finals + l.volatile).filter { $0.end > consumedUntil }.compactMap(\.conf)
+        return c.isEmpty ? 0 : c.reduce(0, +) / Double(c.count)
+    }
+
+    private func laneEnd(_ l: Lane) -> Double {
+        (l.finals + l.volatile).map(\.end).filter { $0 < .greatestFiniteMagnitude }.max() ?? consumedUntil
+    }
+
+    private func handle(lane: Lane, segs: [Seg], isFinal: Bool) {
+        if isFinal {
+            lane.finals.append(contentsOf: segs)
+            lane.volatile = []
+            lane.finals.removeAll { $0.end <= consumedUntil }
+        } else {
+            lane.volatile = segs
+        }
+        let text = laneText(lane)
+        guard !text.isEmpty else { return }
         lastChange = Date()
+        // 雪人说话时用户喊“雪人”：打断她（插话）
+        if speaking, hasWake?(text) == true {
+            NSLog("[语音] 用户插话，停止播报")
+            stopSpeaking()
+        }
         // 唤醒词在哪个语言里出现都算：优先把含唤醒词的那条交给上层
-        let texts = lanes.map(\.text).filter { !$0.isEmpty }
+        let texts = lanes.map(laneText).filter { !$0.isEmpty }
         if let withWake = texts.first(where: { shouldKeep?($0) ?? false }) { onPartial?(withWake) }
-        else if let b = best() { onPartial?(b.text) }
+        else if let b = best() { onPartial?(laneText(b)) }
     }
 
     // 某个语言的识别器被系统停掉：从候选里去掉，其余继续
@@ -276,11 +382,18 @@ final class SpeechInput {
 
     // 置信度最高的语言（还没有置信度时用文字长度兜底）
     private func best() -> Lane? {
-        let cands = lanes.filter { !$0.text.isEmpty }
-        return cands.max { a, b in
-            if a.confCount > 0 && b.confCount > 0 { return a.confidence < b.confidence }
-            return a.text.count < b.text.count
+        lanes.filter { !laneText($0).isEmpty }.max { a, b in
+            let ca = laneConfidence(a), cb = laneConfidence(b)
+            if ca > 0 && cb > 0 { return ca < cb }
+            return laneText(a).count < laneText(b).count
         }
+    }
+
+    // 把当前所有语言里已识别的内容标记为“用过了”
+    private func consumeAll() {
+        consumedUntil = max(consumedUntil, lanes.map(laneEnd).max() ?? consumedUntil)
+        for l in lanes { l.finals = []; l.volatile = [] }
+        commandStart = nil
     }
 
     private func tick() {
@@ -288,19 +401,20 @@ final class SpeechInput {
         if running, audioClock.secondsSinceLast() > 2 { restartEngine("2 秒没有音频") }
         guard let b = best() else { return }
         let quiet = Date().timeIntervalSince(lastChange)
-        let complete = lanes.contains { !$0.text.isEmpty && (isComplete?($0.text) ?? false) }
+        let complete = lanes.contains { l in let t = laneText(l); return !t.isEmpty && (isComplete?(t) ?? false) }
         let need = complete ? 0.6 : 1.4
         let tooLong = commandStart.map { Date().timeIntervalSince($0) > 7 } ?? false
         guard quiet > need || tooLong else { return }
         // 唤醒词 / 命令可能只在某种语言的结果里：优先用“值得保留”的那条里置信度最高的
-        let pick = lanes.filter { !$0.text.isEmpty && (shouldKeep?($0.text) ?? false) }
-            .max { $0.confidence < $1.confidence } ?? b
-        let keep = shouldKeep?(pick.text) ?? true
-        let summary = lanes.map { "\($0.lang)=\($0.text)(\(String(format: "%.2f", $0.confidence)))" }.joined(separator: " | ")
-        let text = pick.text, lang = pick.lang
-        for l in lanes { l.reset() }
-        commandStart = nil
-        guard keep else { return }   // 旁边的人声：不交给上层
+        let pick = lanes.filter { let t = laneText($0); return !t.isEmpty && (shouldKeep?(t) ?? false) }
+            .max { laneConfidence($0) < laneConfidence($1) } ?? b
+        let text = laneText(pick), lang = pick.lang
+        let keep = shouldKeep?(text) ?? true
+        let summary = lanes.map { "\($0.lang)=\(laneText($0))(\(String(format: "%.2f", laneConfidence($0))))" }.joined(separator: " | ")
+        consumeAll()
+        guard keep else { return }   // 旁边的人声 / 没喊雪人：丢掉
+        // 雪人说话时，没有喊“雪人”的话不算（只可能是回声或旁人）
+        if speaking && hasWake?(text) != true { return }
         NSLog("[语音] 一句话（停顿 %.1f 秒%@），选 %@：%@  [%@]", quiet, tooLong ? "，超过 7 秒强制结束" : "", lang, text, summary)
         onUtterance?(text, lang)
     }

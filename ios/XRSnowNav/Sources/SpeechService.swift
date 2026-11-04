@@ -19,6 +19,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         configure(listening: false)
     }
 
+    // 听的时候说话由 SpeechInput 的引擎负责；这里只在不听时用
     func configure(listening: Bool) {
         self.listening = listening
         let s = AVAudioSession.sharedInstance()

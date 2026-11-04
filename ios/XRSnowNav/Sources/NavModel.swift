@@ -34,7 +34,7 @@ final class NavModel {
     var talkLang: String { didSet { save(); session?.setTalkLang(talkLang); Task { await restartListening() } } }
     // 第二语言：和“我说的语言”同时听（日语或英语）
     var secondLang: String { didSet { save(); Task { await restartListening() } } }
-    var voiceOn: Bool { didSet { save(); speech.enabled = voiceOn; if !voiceOn { speech.stop() } } }
+    var voiceOn: Bool { didSet { save(); speech.enabled = voiceOn; if !voiceOn { stopTalking() } } }
     var wakeWordOn: Bool { didSet { save(); Task { await updateListening() } } }
     var mode: Mode { didSet { save(); configureSession(); updateLocation() } }
     var simSpeed: Double { didSet { save(); if simTimer != nil { startSimTimer() } } }
@@ -80,6 +80,7 @@ final class NavModel {
     private var lastNavState = "idle"
     private var wakeAcked = false
     private var replyLang = "zh"
+    var speakingNow = false
     private var cloudStartedNav = false
     private var runsToday = 0
     private var navStartedAt = Date()
@@ -105,7 +106,8 @@ final class NavModel {
         hasKey = brain.hasKey
         location.onLocation = { [weak self] loc in self?.handle(loc) }
         location.onStatus = { [weak self] s in self?.status = s }
-        speech.onSpeaking = { [weak self] on, sec in self?.input.mute(on, seconds: sec) }
+        input.hasWake = { [weak self] t in self?.session?.hasWake(t) ?? false }
+        input.onSpeakingChanged = { [weak self] on in self?.speakingNow = on }
         input.onPartial = { [weak self] t in self?.onPartial(t) }
         input.isComplete = { [weak self] t in self?.looksComplete(t) ?? false }
         input.shouldKeep = { [weak self] t in self?.shouldKeep(t) ?? false }
@@ -172,7 +174,7 @@ final class NavModel {
     // 大按钮 / 操作按钮 / Siri：打开一个“直接说，不用喊雪人”的窗口
     func talkButton() {
         XueRenIntentState.pendingListen = false
-        if speech.isSpeaking { speech.stop() }
+        stopTalking()
         openCommandWindow(seconds: 8)
         Task { await updateListening() }
     }
@@ -199,7 +201,7 @@ final class NavModel {
     private func updateListening() async {
         let want = wakeWordOn || Date() < commandWindowUntil
         if want && !input.running {
-            speech.configure(listening: true)
+            speech.stop()
             await input.start(langs: listenLangs)
             listening = input.running
         } else if !want && input.running {
@@ -242,6 +244,21 @@ final class NavModel {
 
     // 识别结果和雪人最近说过的话大部分重合 → 是扬声器的回声
     private var recentSpoken: [String] = []
+    // 在听的时候从语音管线的引擎播出（回声消除需要），否则用普通的系统语音
+    private func speakOut(_ text: String, lang: String) {
+        guard voiceOn, !text.isEmpty else { return }
+        if input.running {
+            input.speak(text, voice: SpeechService.bestVoice(lang == "ja" ? "ja-JP" : lang == "en" ? "en-US" : "zh-CN"))
+        } else {
+            speech.speak(text, lang: lang)
+        }
+    }
+
+    private func stopTalking() {
+        input.stopSpeaking()
+        speech.stop()
+    }
+
     private func rememberSpoken(_ text: String) {
         recentSpoken.append(text)
         if recentSpoken.count > 6 { recentSpoken.removeFirst() }
@@ -285,6 +302,11 @@ final class NavModel {
         if stripped.isEmpty {
             if !acked { reply("我在", note: "唤醒") }
             openCommandWindow(seconds: 8)
+            return
+        }
+        // 没喊雪人、只是在等回答的时候，听到很短又听不懂的词（旁边的声音、残音）就不理会
+        if !woke && stripped.count <= 3 && session.understandLocal(stripped).contains("\"intent\":\"unknown\"") {
+            NSLog("[唤醒] 等回答时听到的短词，忽略：%@", stripped)
             return
         }
         commandWindowUntil = .distantPast
@@ -353,7 +375,7 @@ final class NavModel {
         switch ev {
         case "started": navStarted()
         case "stopped": navStopped()
-        case "paused": paused = true; speech.stop()
+        case "paused": paused = true; stopTalking()
         case "resumed": paused = false
         default: break
         }
@@ -398,7 +420,7 @@ final class NavModel {
     private func reply(_ text: String, note: String? = nil) {
         chat.append(ChatLine(who: .xueren, text: text, note: note))
         rememberSpoken(text)
-        speech.speak(text, lang: SpeechService.languageOf(text, fallback: replyLang))
+        speakOut(text, lang: SpeechService.languageOf(text, fallback: replyLang))
     }
 
     // MARK: - 导航
@@ -428,19 +450,19 @@ final class NavModel {
         if navigating { session?.stop(nowMs: nowMs) }
         if recorder.recording && !testing { finishRecording() }
         paused = false
-        speech.stop()
+        stopTalking()
         refresh()
     }
 
     func togglePause() {
         guard let session, navigating else { return }
-        if paused { session.resume(nowMs: nowMs); paused = false } else { session.pause(nowMs: nowMs); paused = true; speech.stop() }
+        if paused { session.resume(nowMs: nowMs); paused = false } else { session.pause(nowMs: nowMs); paused = true; stopTalking() }
         refresh()
     }
 
     func replay() {
         guard let text = session?.replayText(nowMs: nowMs) else { return }
-        speech.speak(text, lang: lang)
+        speakOut(text, lang: lang)
     }
 
     func simWrongBranch() { session?.simWrongBranch() }
@@ -553,7 +575,7 @@ final class NavModel {
             if item.key == "start" && cloudStartedNav { cloudStartedNav = false; continue }
             chat.append(ChatLine(who: .system, text: item.text, note: item.reason))
             NSLog("[播报] %@", item.text)
-            if item.voice && !paused { rememberSpoken(item.text); speech.speak(item.text, lang: lang) }
+            if item.voice && !paused { rememberSpoken(item.text); speakOut(item.text, lang: lang) }
         }
         if chat.count > 200 { chat.removeFirst(chat.count - 200) }
     }

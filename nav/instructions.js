@@ -40,7 +40,7 @@ export function spokenName(e, lang = 'zh') {
 }
 
 const SIDE = {
-  zh: { left: '靠左', right: '靠右', middle: '走中间', unclear: '' },
+  zh: { left: '靠左', right: '靠右', middle: '走中间那条', unclear: '' },
   ja: { left: '左へ', right: '右へ', middle: '真ん中へ', unclear: '' }
 };
 
@@ -112,7 +112,16 @@ export function buildManeuvers(resort, edges, destNodeId) {
   return list;
 }
 
+// 同一类提示换着说，听起来不像机器（按指令 id 固定选择，同一条提示每次说法一样，便于测试和重播）
+function pick(m, kind, variants) {
+  const key = `${m.id || ''}:${kind}`;
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return variants[h % variants.length];
+}
+
 // 生成播报文本。kind: 'preview'（提前预告）/ 'main'（主提示）/ 'late'（来不及时的短提示）/ 'confirm'
+// 口吻是陪滑的朋友，不是车载导航：短、口语、关键信息（左右 + 雪道）放在最前面。
 export function maneuverText(m, kind, { lang = 'zh', distance = null } = {}) {
   const S = SIDE[lang] || SIDE.zh;
   const side = S[m.side] || '';
@@ -124,46 +133,48 @@ export function maneuverText(m, kind, { lang = 'zh', distance = null } = {}) {
 
   if (lang === 'ja') {
     m = { ...m, destName: m.destNameJa || m.destName };
-    const go = m.sameRun ? `${out}をそのまま進んでください` : `${out}に進んでください`;
-    const thenJa = m.then ? `。続けて${then}${thenOut}へ` : '';
+    const go = m.sameRun ? `${out}をそのまま` : `${out}へ`;
+    const thenJa = m.then ? `、すぐ${then}${thenOut}` : '';
     switch (m.type) {
       case 'fork':
-        if (kind === 'preview') return `およそ${meters}メートル先、分岐です。${side}${out}に進みます${thenJa}`;
-        if (kind === 'late') return side ? `${side}、${out}` : `${out}へ`;
-        if (kind === 'confirm') return `${out}に入りました`;
-        return side ? `この先分岐、${side}、${go}${thenJa}。${m.destName}方面です` : `この先分岐、案内板に従って${go}${thenJa}`;
+        if (kind === 'preview') return side ? `${meters}メートルくらい先で分岐。${side}、${go}ね${thenJa}` : `${meters}メートルくらい先で分岐。案内板の${go}ね${thenJa}`;
+        if (kind === 'late') return side ? `${side}、${out}！` : `${out}！`;
+        if (kind === 'confirm') return pick(m, kind, [`OK、${out}に入ったよ`, `いいね、${out}だよ`, `${out}、合ってるよ`]);
+        return side ? `分岐だよ、${side}！${go}${thenJa}` : `分岐だよ、案内板を見て${go}${thenJa}`;
       case 'exit-lift':
-        if (kind === 'confirm') return `${out}に入りました`;
-        return side ? `リフトを降りたら、${side}${out}に進んでください` : `リフトを降りたら、${out}に進んでください`;
+        if (kind === 'confirm') return `OK、${out}に入ったよ`;
+        return side ? `リフト降りたら${side}、${out}ね` : `リフト降りたら${out}ね`;
       case 'board-lift':
-        if (kind === 'confirm') return `${out}に乗車しました`;
-        if (kind === 'preview') return `およそ${meters}メートル先で、${out}に乗ります`;
-        return `この先、${out}に乗ってください`;
+        if (kind === 'confirm') return pick(m, kind, [`${out}に乗ったね。ちょっと休憩しよう`, `${out}、乗れたね。一息つこう`]);
+        if (kind === 'preview') return `${meters}メートルくらい先で${out}に乗るよ`;
+        return `ここで${out}に乗ろう`;
       case 'arrive':
-        if (kind === 'preview') return `まもなく${m.destName}に到着します`;
-        return `${m.destName}に到着しました`;
+        if (kind === 'preview') return `もうすぐ${m.destName}だよ`;
+        return pick(m, kind, [`着いた！${m.destName}だよ`, `到着、${m.destName}！`]);
       default: return '';
     }
   }
 
-  const go = m.sameRun ? `继续走${out}` : `进入${out}`;
-  const thenZh = m.then ? `，随后${then}进入${thenOut}` : '';
+  // 有左右时：“靠左，二号雪道”；没有左右时：“看路牌走二号雪道”
+  const go = m.sameRun ? `顺着${out}接着滑` : out;
+  const goNoSide = m.sameRun ? `顺着${out}接着滑` : `走${out}`;
+  const thenZh = m.then ? `，紧接着${then}，${thenOut}` : '';
   switch (m.type) {
     case 'fork':
-      if (kind === 'preview') return `约${meters}米后分岔，${side}${go}${thenZh}`;
-      if (kind === 'late') return side ? `${side}，${out}` : `进入${out}`;
-      if (kind === 'confirm') return `已进入${out}`;
-      return side ? `前方分岔${side}，${go}${thenZh}，前往${m.destName}` : `前方分岔，请按路牌${go}${thenZh}，前往${m.destName}`;
+      if (kind === 'preview') return side ? `前面${meters}米有个岔口，到时候${side}，${go}${thenZh}` : `前面${meters}米有个岔口，看路牌${goNoSide}${thenZh}`;
+      if (kind === 'late') return side ? `${side}！${out}！` : `${out}！`;
+      if (kind === 'confirm') return pick(m, kind, [`好嘞，进${out}了`, `对，就是${out}`, `漂亮，${out}没走错`]);
+      return side ? `岔口到了，${side}，${go}${thenZh}` : `岔口到了，看路牌${goNoSide}${thenZh}`;
     case 'exit-lift':
-      if (kind === 'confirm') return `已进入${out}`;
-      return (side ? `下缆车后${side}，进入${out}` : `下缆车后进入${out}`) + thenZh;
+      if (kind === 'confirm') return `好嘞，进${out}了`;
+      return (side ? `下了缆车${side}，走${out}` : `下了缆车走${out}`) + thenZh;
     case 'board-lift':
-      if (kind === 'confirm') return `已乘上${out}`;
-      if (kind === 'preview') return `约${meters}米后乘坐${out}`;
-      return `前方乘坐${out}，前往${m.destName}`;
+      if (kind === 'confirm') return pick(m, kind, [`坐上${out}了，歇会儿吧`, `上${out}了，喘口气`]);
+      if (kind === 'preview') return `前面${meters}米坐${out}`;
+      return `到了，坐${out}`;
     case 'arrive':
-      if (kind === 'preview') return `即将到达${m.destName}`;
-      return `已到达${m.destName}`;
+      if (kind === 'preview') return `快到${m.destName}啦`;
+      return pick(m, kind, [`到啦，${m.destName}！`, `${m.destName}到了！`]);
     default: return '';
   }
 }
@@ -171,24 +182,24 @@ export function maneuverText(m, kind, { lang = 'zh', distance = null } = {}) {
 // 不涉及具体转向的系统提示
 export const SYSTEM_TEXT = {
   zh: {
-    offRoute: '可能偏离路线，请在安全位置停下查看地图',
-    rerouted: '已按当前所在雪道重新规划路线',
-    noReroute: '从当前雪道无法按设定条件到达目的地，请在安全位置停下查看地图',
-    gpsLost: '定位信号中断，暂停转弯提示',
-    gpsWeak: '定位精度不足，暂停转弯提示',
-    gpsBack: '定位已恢复',
-    ambiguous: '暂时无法确定所在雪道，请留意路牌',
-    start: (dest) => `开始导航，前往${dest}`
+    offRoute: '诶，好像走偏了。先找个安全的地方停一下，看看地图',
+    rerouted: '没事，换条路，从你现在这条道接着走',
+    noReroute: '从这条道过不去了，先找个安全的地方停一下，看看地图',
+    gpsLost: '信号丢了，转弯先不报，留意路牌',
+    gpsWeak: '定位不太准，转弯先不报，留意路牌',
+    gpsBack: '信号回来了',
+    ambiguous: '我分不清你在哪条道上，留意一下路牌',
+    start: (dest) => `出发！去${dest}，跟着我`
   },
   ja: {
-    offRoute: 'ルートを外れた可能性があります。安全な場所で止まって地図を確認してください',
-    rerouted: '現在のコースからルートを再計算しました',
-    noReroute: '現在のコースから条件に合うルートがありません。安全な場所で止まって地図を確認してください',
-    gpsLost: '位置情報が途切れました。分岐案内を一時停止します',
-    gpsWeak: '位置の精度が低いため、分岐案内を一時停止します',
-    gpsBack: '位置情報が回復しました',
-    ambiguous: '現在のコースを特定できません。案内板を確認してください',
-    start: (dest) => `${dest}への案内を開始します`
+    offRoute: 'あれ、ルートから外れたかも。安全な所で止まって地図を見よう',
+    rerouted: '大丈夫、今のコースからルートを変えたよ',
+    noReroute: 'このコースからは行けないみたい。安全な所で止まって地図を見よう',
+    gpsLost: '位置が取れない。分岐の案内は止めるね、案内板を見て',
+    gpsWeak: '位置があいまい。分岐の案内は止めるね、案内板を見て',
+    gpsBack: '位置、戻ったよ',
+    ambiguous: 'どのコースにいるか分からない。案内板を見てね',
+    start: (dest) => `出発！${dest}まで、ついてきて`
   }
 };
 

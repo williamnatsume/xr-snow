@@ -97,7 +97,7 @@ test('回头弯后的岔口：按进入方向判断左右（用户朝北滑行�
   const viaHairpin = { edges: [R.edges.get('R1'), R.edges.get('R3')] };
   const ms = buildManeuvers(R, viaHairpin.edges, 'M');
   assert.equal(ms[0].side, 'right');
-  assert.match(maneuverText(ms[0], 'main'), /靠右，进入三号雪道/);
+  assert.match(maneuverText(ms[0], 'main'), /靠右，三号雪道/);
   assert.ok(p.ok);
 });
 
@@ -118,13 +118,13 @@ test('正常经过岔口：每条指令只播一次，按顺序确认，最终�
   const keys = run.spoken.map((s) => s.key);
   assert.equal(new Set(keys).size, keys.length, '没有重复的播报 key');
   assert.equal(new Set(t).size, t.length, '没有重复的播报文本：\n' + t.join('\n'));
-  assert.ok(t.some((x) => /前方分岔靠左，进入二号雪道/.test(x)), t.join('\n'));
-  assert.ok(t.includes('已进入二号雪道'));
+  assert.ok(t.some((x) => /岔口到了，靠左，二号雪道/.test(x)), t.join('\n'));
+  assert.ok(t.some((x) => /二号雪道/.test(x) && /进|就是|没走错/.test(x) && !/岔口/.test(x)), t.join('\n'));
   // 森林岔口：规划会选 6 或 7 号（按时间代价），无论哪条都要有主提示和确认
   const forest = ids(run.plan).includes('R7') ? '七' : '六';
-  assert.ok(t.some((x) => new RegExp(`前方分岔.*进入${forest}号雪道`).test(x)), t.join('\n'));
-  assert.ok(t.includes(`已进入${forest}号雪道`));
-  assert.ok(t.includes('已到达山脚餐厅'));
+  assert.ok(t.some((x) => new RegExp(`岔口到了.*${forest}号雪道`).test(x)), t.join('\n'));
+  assert.ok(t.some((x) => x.includes(`${forest}号雪道`) && !/岔口/.test(x)), t.join('\n'));
+  assert.ok(t.some((x) => /山脚餐厅/.test(x) && /到啦|到了/.test(x)), t.join('\n'));
   assert.equal(run.nav.state, 'arrived');
   assert.ok(!run.states.some((s) => s.state === 'offRoute'), '正常滑行不应偏航：' + JSON.stringify(run.states));
   // 主提示必须在到达岔口之前
@@ -141,7 +141,7 @@ test('S 弯 + 中等漂移：不会反复播报左右', () => {
     const run = runScenario(R, { start: 'S', goal: 'REST', prefs: { maxDifficulty: 2 }, sim: { seed, drift: 7 } });
     const t = texts(run.spoken);
     assert.equal(new Set(t).size, t.length, `seed ${seed} 有重复播报：\n` + t.join('\n'));
-    const forkCalls = t.filter((x) => /前方分岔/.test(x));
+    const forkCalls = t.filter((x) => /岔口到了/.test(x));
     assert.ok(forkCalls.length <= 3, `seed ${seed}：${forkCalls.join(' / ')}`);
     assert.equal(run.nav.state, 'arrived', `seed ${seed} 状态 ${JSON.stringify(run.states)}`);
   }
@@ -154,8 +154,8 @@ test('定位中断：不输出确定的转弯指令，恢复后才继续', () =>
     events: [{ at: 30, do: ({ simu }) => simu.startOutage(25) }]
   });
   const during = run.spoken.filter((s) => s.t > 30000 + 5000 && s.t < 55000);
-  for (const s of during) assert.ok(!/靠左|靠右|走中间|已进入/.test(s.text), '中断期间不该有转向/确认：' + s.text);
-  assert.ok(run.spoken.some((s) => s.text.includes('定位信号中断')));
+  for (const s of during) assert.ok(!/靠左|靠右|中间那条|好嘞|就是|没走错/.test(s.text), '中断期间不该有转向/确认：' + s.text);
+  assert.ok(run.spoken.some((s) => s.text.includes('信号丢了')));
   // 中断期间界面不显示距离（不把旧位置当实时位置）
   const outageSnaps = run.snaps.filter((z) => z.sec > 37 && z.sec < 55);
   assert.ok(outageSnaps.every((z) => z.snap.distToNext === null), '中断期间距离应为空');
@@ -166,9 +166,9 @@ test('定位中断：不输出确定的转弯指令，恢复后才继续', () =>
 test('回头弯（完整模拟）：在回头弯岔口播报“靠右”，并确认进入', () => {
   const run = runScenario(R, { goal: 'M', prefs: { maxDifficulty: 2 }, routeEdges: ['R1', 'R3'], sim: { drift: 5, seed: 2 } });
   const t = texts(run.spoken);
-  assert.ok(t.some((x) => x.startsWith('前方分岔靠右，进入三号雪道')), t.join('\n'));
+  assert.ok(t.some((x) => x.startsWith('岔口到了，靠右，三号雪道')), t.join('\n'));
   assert.ok(!t.some((x) => /靠左/.test(x)), t.join('\n'));
-  assert.ok(t.includes('已进入三号雪道'));
+  assert.ok(t.some((x) => x.includes('三号雪道') && !/岔口/.test(x)), t.join('\n'));
   assert.equal(run.nav.state, 'arrived');
 });
 
@@ -191,10 +191,10 @@ test('相邻雪道：沿两条雪道正中间滑行时，不确认任何一条�
     states.add(nav.state);
   }
   const tx = spoken.map((x) => x.text);
-  assert.ok(!tx.some((x) => /^已进入/.test(x)), '不应确认：' + tx.join(' / '));
+  assert.ok(!tx.some((x) => /^(好嘞|对，就是|漂亮)/.test(x)), '不应确认：' + tx.join(' / '));
   assert.ok(!tx.some((x) => /偏离路线/.test(x)), '不应判偏航：' + tx.join(' / '));
   assert.ok(states.has('unreliable') && nav.unreliable?.reason === 'ambiguous', [...states].join(','));
-  assert.ok(tx.includes('暂时无法确定所在雪道，请留意路牌'));
+  assert.ok(tx.includes('我分不清你在哪条道上，留意一下路牌'));
   assert.equal(nav.snapshot(t).distToNext, null, '无法区分时不显示距离');
 });
 
@@ -202,18 +202,18 @@ test('相邻雪道 + 较大漂移（模拟）：确认时一定与其他分支�
   for (const seed of [4, 6, 8]) {
     const run = runScenario(R, { start: 'M', goal: 'J4', prefs: { maxDifficulty: 2, preferShort: true }, sim: { drift: 9, seed, carve: false } });
     assert.ok(run.snaps.some((z) => z.truth?.edge === 'R7' || z.truth?.edge === 'R6'), '确实滑到了相邻雪道');
-    for (const c of run.spoken.filter((s) => /^已进入/.test(s.text))) {
+    for (const c of run.spoken.filter((s) => /^(好嘞|对，就是|漂亮)/.test(s.text))) {
       const m = /距预期分支 (\d+) m，距其他分支 ≥ (\d+) m/.exec(c.reason);
       assert.ok(m && Number(m[2]) - Number(m[1]) >= 10, c.reason);
     }
-    assert.ok(!run.spoken.some((s) => /可能偏离路线/.test(s.text)), `seed ${seed}：` + texts(run.spoken).join('\n'));
+    assert.ok(!run.spoken.some((s) => /好像走偏了/.test(s.text)), `seed ${seed}：` + texts(run.spoken).join('\n'));
   }
 });
 
 test('相邻雪道 + 小漂移：可以正确确认', () => {
   const run = runScenario(R, { start: 'M', goal: 'REST', prefs: { maxDifficulty: 2, preferShort: true }, sim: { drift: 2, seed: 4 } });
   const t = texts(run.spoken);
-  assert.ok(t.some((x) => /^已进入(六|七)号雪道$/.test(x)), t.join('\n'));
+  assert.ok(t.some((x) => /^(好嘞，进|对，就是|漂亮，)(六|七)号雪道/.test(x)), t.join('\n'));
 });
 
 test('走错分支：提示偏航但不要求掉头/急转，并从当前雪道向前重新规划', () => {
@@ -223,8 +223,8 @@ test('走错分支：提示偏航但不要求掉头/急转，并从当前雪道�
     events: [{ at: 5, do: ({ simu }) => simu.takeWrongBranchAtNextFork() }]
   });
   const t = texts(run.spoken);
-  assert.ok(t.includes('可能偏离路线，请在安全位置停下查看地图'), t.join('\n'));
-  const offIdx = t.indexOf('可能偏离路线，请在安全位置停下查看地图');
+  assert.ok(t.includes('诶，好像走偏了。先找个安全的地方停一下，看看地图'), t.join('\n'));
+  const offIdx = t.indexOf('诶，好像走偏了。先找个安全的地方停一下，看看地图');
   // 偏航后的任何提示都不能包含掉头/逆行/立即转向
   for (const x of t.slice(offIdx)) assert.ok(!/掉头|逆行|往回|立即|马上|急转/.test(x), x);
   // 紧接偏航后的提示中不能出现转向
@@ -246,7 +246,7 @@ test('走进关闭雪道时：仍只提示偏航，并从该雪道向前规划',
     } }]
   });
   const t = texts(run.spoken);
-  assert.ok(t.includes('可能偏离路线，请在安全位置停下查看地图'), t.join('\n'));
+  assert.ok(t.includes('诶，好像走偏了。先找个安全的地方停一下，看看地图'), t.join('\n'));
   for (const x of t) assert.ok(!/掉头|逆行|往回/.test(x), x);
 });
 
@@ -258,6 +258,6 @@ test('静止时不做方向判断', () => {
              { at: 60, do: ({ simu }) => { simu.skierFactor = simu._saved; } }]
   });
   const during = run.spoken.filter((s) => s.t > 25000 && s.t < 60000);
-  for (const s of during) assert.ok(!/靠左|靠右|走中间|已进入/.test(s.text), '静止期间不应有方向结论：' + s.text);
+  for (const s of during) assert.ok(!/靠左|靠右|中间那条|好嘞|就是|没走错/.test(s.text), '静止期间不应有方向结论：' + s.text);
   assert.equal(run.nav.state, 'arrived');
 });
