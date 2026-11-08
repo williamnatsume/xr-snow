@@ -63,7 +63,7 @@ final class RealtimeSession {
                         "transcription": ["model": "gpt-4o-mini-transcribe"],
                         "turn_detection": [
                             "type": "server_vad", "create_response": true, "interrupt_response": true,
-                            "prefix_padding_ms": 300, "silence_duration_ms": 450, "threshold": 0.55
+                            "prefix_padding_ms": 300, "silence_duration_ms": 450, "threshold": 0.5
                         ]
                     ],
                     "output": ["format": ["type": "audio/pcm", "rate": 24000], "voice": voice]

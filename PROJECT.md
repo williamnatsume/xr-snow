@@ -196,7 +196,9 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - 控制成本和隐私：唤醒词仍在本机识别；听到“雪人”就预先连接，本机把这句话听完后作为文字发过去（rtWaitingLocal），之后麦克风声音才直送云端（本机识别器暂停）；20 秒没人说话自动挂断。只喊“雪人”时让模型打个招呼。
 - 音频：麦克风 → `RealtimeTap` 在音频线程转 24kHz PCM16；回复声音 → 同一个 AVAudioPlayerNode 播（回声消除有效）。转弯播报仍由本机 TTS 负责。
 - 设置：实时语音开关、OpenAI 密钥（钥匙串，单独账户名）、模型、声音（marin / cedar 推荐）。启动参数 `-rtsay "一句话"` 测试实时路径。
-- 状态：编译通过、Claude 路径回归通过；**实时路径未实测**（等用户填 OpenAI 密钥）。
+- 修：`threshold: 0.55` 被 JSONSerialization 写成 0.55000000000000004，服务端报 decimal_max_decimal_places_exceeded → 改 0.5（二进制能精确表示的值）。
+- 保温：20 秒没人说话只停止送声音（不再产生音频 token），连接再保持 5 分钟，下次唤醒免连接；5 分钟后关闭。`rtStreaming` 才把非唤醒的话交给云端。
+- **真机实测（用户手机，-rtsay）**：连接就绪 1.0–2.0 秒，就绪后约 1 秒开口；会主动调用 plan_route（用户当时选的是神乐，没有“山腰站”，如实说找不到）；20 秒后转保温。用户亲口对话、插话尚未实测。
 
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 

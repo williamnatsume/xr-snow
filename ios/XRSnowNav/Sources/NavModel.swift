@@ -315,6 +315,8 @@ final class NavModel {
     private var rtPendingText: String?
     private var rtPendingGreet = false
     private var rtFallbackText: String?
+    private var rtStreaming = false        // 麦克风正在直送云端
+    private var rtWarmSince: Date?         // 不送声音、只保持连接（下次唤醒免去连接时间）
     private var rtWaitingLocal = false     // 预先连接时，等本机把这句话听完再交给云端
 
     var useRealtime: Bool { realtimeOn && hasOpenAIKey }
@@ -388,6 +390,9 @@ final class NavModel {
         input.realtimeTap.setSink { [weak rt] pcm in
             Task { @MainActor in rt?.appendAudio(pcm) }
         }
+        rtStreaming = true
+        rtWarmSince = nil
+        rtActive = true
         if let t = rtPendingText { rt.sendUserText(t) }
         else if rtPendingGreet { rt.greet("用户刚喊了你的名字“雪人”。用一句很短、很自然的话回应，比如“我在，怎么了？”") }
         rtPendingText = nil
@@ -399,6 +404,8 @@ final class NavModel {
         input.realtimeTap.setSink(nil)
         rtSession = nil
         rtActive = false
+        rtStreaming = false
+        rtWarmSince = nil
         input.stopSpeaking()
         if let reason {
             status = "实时语音断开：\(reason)"
@@ -409,10 +416,23 @@ final class NavModel {
     }
 
     // 20 秒没人说话：挂断实时连接（按时长计费，省钱），回到喊“雪人”唤醒
+    // 20 秒没人说话：停止送声音（不再计费），回到喊“雪人”唤醒，但连接再保持 5 分钟（下次唤醒不用等连接）
     private func rtIdleCheck() {
         guard let rt = rtSession, !input.speaking else { return }
-        if Date().timeIntervalSince(rtLastActivity) > 20 { rt.close() }
-        else if !rt.ready && Date().timeIntervalSince(rtLastActivity) > 8 { rt.close("连接超时") }
+        if !rt.ready {
+            if Date().timeIntervalSince(rtLastActivity) > 8 { rt.close("连接超时") }
+            return
+        }
+        if rtStreaming, Date().timeIntervalSince(rtLastActivity) > 20 {
+            input.realtimeTap.setSink(nil)
+            rtStreaming = false
+            rtActive = false
+            rtWarmSince = Date()
+            NSLog("[实时] 20 秒没人说话，停止送声音，连接保温 5 分钟")
+            Task { await updateListening() }
+        } else if let w = rtWarmSince, Date().timeIntervalSince(w) > 300 {
+            rt.close()
+        }
     }
 
     func endRealtime() { rtSession?.close() }
@@ -473,7 +493,7 @@ final class NavModel {
         let stripped = session.stripWake(text)
         let woke = session.hasWake(text)
         guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
-        if useRealtime && (woke || rtSession != nil) {
+        if useRealtime && (woke || rtStreaming) {
             commandWindowUntil = .distantPast
             commandWindowOpen = false
             if !stripped.isEmpty { chat.append(ChatLine(who: .user, text: stripped)) }
@@ -725,7 +745,7 @@ final class NavModel {
 
     // 前台和后台（定位在跑时 App 不会被挂起）都会走这里
     private func everySecond() {
-        if rtActive { rtIdleCheck() }
+        if rtSession != nil { rtIdleCheck() }
         if commandWindowOpen && Date() >= commandWindowUntil {
             commandWindowOpen = false
             Task { await updateListening() }
