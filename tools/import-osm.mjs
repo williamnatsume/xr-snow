@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { convertOsm, elevationPoints, eleKey } from '../nav/osm-import.js';
 import { applyEvidence } from '../nav/trace-evidence.js';
+import { applyReview } from '../nav/review.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IN = process.argv[2] || path.join(ROOT, 'data/osm/kagura-overpass.json');
@@ -59,6 +60,13 @@ const EVIDENCE = path.join(ROOT, 'data/osm', `${OPTS.id.replace(/-osm$/, '')}-tr
 if (fs.existsSync(EVIDENCE)) {
   applyEvidence(out, JSON.parse(fs.readFileSync(EVIDENCE, 'utf8')));
   console.log('轨迹证据：', JSON.stringify(out.importReport.traceEvidence));
+}
+// 人工核对（航空照片核对页的标记，tools/apply-review.mjs 导出）
+const REVIEW = path.join(ROOT, 'data/osm', `${OPTS.id.replace(/-osm$/, '')}-review.json`);
+if (fs.existsSync(REVIEW)) {
+  applyReview(out, JSON.parse(fs.readFileSync(REVIEW, 'utf8')));
+  const rv = out.importReport.review;
+  console.log(`人工核对：${rv.marks} 个标记，确认 ${rv.confirmed} 处推算连接，关闭 ${rv.closed} 段，待办 ${rv.todo.length} 个`);
 }
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out, null, 1));

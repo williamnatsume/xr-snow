@@ -91,3 +91,21 @@ test('轨迹证据：神乐的推算连接里，被公开轨迹佐证的不再�
   assert.equal(after.attr.evidence, 'gps-traces');
   assert.ok(out.importReport.traceEvidence.confirmedInferred >= 1);
 });
+
+test('人工核对：对的 → 去掉不确定；走不通 → 规划避开；其他进待办', async () => {
+  const { applyReview } = await import('../nav/review.js');
+  const out = convertOsm(raw, OPTS, (lat, lon) => cache[eleKey(lat, lon)] ?? null);
+  const c = out.edges.find((e) => e.type === 'connector' && e.uncertain);
+  const run = out.edges.find((e) => e.type === 'run');
+  applyReview(out, [
+    { resort: 't', kind: 'edge', target: c.id, status: 'ok', at: '1' },
+    { resort: 't', kind: 'edge', target: run.id, status: 'blocked', note: '有围栏', at: '2' },
+    { resort: 't', kind: 'point', status: 'missing', lat: 36.87, lon: 138.75, note: '这里有条林道', at: '3' }
+  ]);
+  assert.equal(out.edges.find((e) => e.id === c.id).uncertain, false);
+  assert.equal(out.edges.find((e) => e.id === run.id).open, false);
+  assert.equal(out.importReport.review.todo.length, 1);
+  const R = loadResort(out);
+  const p = planRoute(R, { startNode: run.from, goalNode: run.to }, { maxDifficulty: 4, allowUnknownDifficulty: true });
+  assert.ok(!p.ok || !p.edges.some((e) => e.id === run.id), '关闭的雪道不应出现在路线里');
+});

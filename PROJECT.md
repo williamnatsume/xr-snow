@@ -242,6 +242,11 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - `data/osm/kagura-trace-evidence.json`（只有统计，可提交）；`tools/import-osm.mjs` 存在证据文件时自动写入。iPhone 下载地图后也会按小格拉 OSM 公开轨迹核对（最多 40 次请求），失败不影响使用；iPhone 端未实测（当时锁屏）。
 - 结论：公开轨迹在热门雪场（苗场）有用，在神乐太稀疏。下一步价值最高的是用户自己的轨迹（自愿上传，按同一套 traceEvidence 分析）；航空照片深度学习是更长期的研究项目。
 
+#### 航空照片核对页（2026-11-08）
+- 私有 Artifact「雪人地图核对」：https://claude.ai/artifact/LzvGDQ4kYZJ3bTEbJMf2V4 。国土地理院シームレス空中写真 zoom 17（约 1.2 m/像素）拼成 1024 px 大图随页面发布（Artifact 不能直接加载外部图片）：神乐 56 张、苗场 12 张，约 20 MB。叠加 OSM 雪道（按难度着色）、缆车、推算连接（橙色 = 没人验证，青色 = 有公开轨迹佐证）、岔口（黄圈）。
+- 标记存共享存储 `marks`；`tools/apply-review.mjs` 导出 → `data/osm/<雪场>-review.json` → `tools/import-osm.mjs` 用 `nav/review.js` 应用（对的 → 去掉不确定；走不通 → open=false 规划避开；画歪 / 名字 / 缺的路 → 待办）。说明见 `tools/review/README.md`。
+- 深度学习识别雪道（用 OSM 雪道当弱标注训练分割模型）是之后的研究项目，先看人工核对发现多少问题再决定。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。
