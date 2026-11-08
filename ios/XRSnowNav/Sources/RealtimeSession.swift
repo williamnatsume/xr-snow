@@ -47,7 +47,7 @@ final class RealtimeSession {
         let t = urlSession.webSocketTask(with: req)
         task = t
         t.resume()
-        NSLog("[实时] 连接 %@，声音 %@", model.rawValue, voice)
+        XLog("[实时] 连接 %@，声音 %@", model.rawValue, voice)
         receive()
         send([
             "type": "session.update",
@@ -105,7 +105,7 @@ final class RealtimeSession {
         ready = false
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
-        NSLog("[实时] 关闭：%@（持续 %.0f 秒）", reason ?? "正常", Date().timeIntervalSince(connectedAt))
+        XLog("[实时] 关闭：%@（持续 %.0f 秒）", reason ?? "正常", Date().timeIntervalSince(connectedAt))
         onClosed?(reason)
     }
 
@@ -142,7 +142,7 @@ final class RealtimeSession {
         case "session.updated":
             if !ready {
                 ready = true
-                NSLog("[实时] 就绪（%.2f 秒）", Date().timeIntervalSince(connectedAt))
+                XLog("[实时] 就绪（%.2f 秒）", Date().timeIntervalSince(connectedAt))
                 let queued = pending; pending = []
                 for s in queued { task?.send(.string(s)) { _ in } }
                 onReady?()
@@ -173,7 +173,7 @@ final class RealtimeSession {
             let args = ev["arguments"] as? String ?? "{}"
             let callId = ev["call_id"] as? String ?? ""
             let out = onToolCall?(name, args) ?? "{\"error\":\"没有处理\"}"
-            NSLog("[实时] 工具 %@ %@ → %@", name, args, String(out.prefix(200)))
+            XLog("[实时] 工具 %@ %@ → %@", name, args, String(out.prefix(200)))
             send(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": callId, "output": out]])
             needsResponseAfterTools = true
         case "response.done":
@@ -181,14 +181,14 @@ final class RealtimeSession {
             // 这轮回答里调用了工具：把结果交回去，让它接着说
             if needsResponseAfterTools { needsResponseAfterTools = false; send(["type": "response.create"]) }
             if let r = ev["response"] as? [String: Any], let status = r["status"] as? String, status == "failed" {
-                NSLog("[实时] 回答失败：%@", String(describing: r["status_details"] ?? ""))
+                XLog("[实时] 回答失败：%@", String(describing: r["status_details"] ?? ""))
             }
             onActivity?()
         case "error":
             let e = ev["error"] as? [String: Any]
             let msg = e?["message"] as? String ?? text
             let code = e?["code"] as? String ?? ""
-            NSLog("[实时] 错误 %@：%@", code, msg)
+            XLog("[实时] 错误 %@：%@", code, msg)
             // 鉴权、额度等致命错误：关掉，上层退回 Claude / 离线
             if ["invalid_api_key", "insufficient_quota", "model_not_found"].contains(code) || msg.contains("Incorrect API key") {
                 close("\(code) \(msg)")

@@ -90,6 +90,7 @@ final class NavModel {
     private var wakeAcked = false
     private var replyLang = "zh"
     var speakingNow = false
+    private var lastSpeakEnd = Date.distantPast
     private var cloudStartedNav = false
     private var runsToday = 0
     private var navStartedAt = Date()
@@ -122,12 +123,15 @@ final class NavModel {
         location.onLocation = { [weak self] loc in self?.handle(loc) }
         location.onStatus = { [weak self] s in self?.status = s }
         input.hasWake = { [weak self] t in self?.session?.hasWake(t) ?? false }
-        input.onSpeakingChanged = { [weak self] on in self?.speakingNow = on }
+        input.onSpeakingChanged = { [weak self] on in
+            self?.speakingNow = on
+            if !on { self?.lastSpeakEnd = Date() }
+        }
         input.onPartial = { [weak self] t in self?.onPartial(t) }
         input.isComplete = { [weak self] t in self?.looksComplete(t) ?? false }
         input.shouldKeep = { [weak self] t in self?.shouldKeep(t) ?? false }
         input.onUtterance = { [weak self] t, lang in self?.heard(t, lang: lang) }
-        input.onStatus = { [weak self] s in self?.status = s; NSLog("[语音状态] %@", s) }
+        input.onStatus = { [weak self] s in self?.status = s; XLog("[语音状态] %@", s) }
         NotificationCenter.default.addObserver(forName: .xueRenListen, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.talkButton() }
         }
@@ -350,12 +354,14 @@ final class NavModel {
         rt.onUserText = { [weak self] t in
             guard let self else { return }
             self.chat.append(ChatLine(who: .user, text: t))
+            XLog("[对话] 用户（实时）：%@", t)
             self.history.append(BrainTurn(role: "user", text: t))
         }
         rt.onAssistantText = { [weak self] t in
             guard let self else { return }
             self.chat.append(ChatLine(who: .xueren, text: t, note: "实时 \(self.rtModel == .full ? "GPT" : "GPT mini")"))
             self.rememberSpoken(t)
+            XLog("[对话] 雪人（实时）：%@", t)
             self.history.append(BrainTurn(role: "assistant", text: t))
             if self.history.count > 16 { self.history.removeFirst(self.history.count - 16) }
         }
@@ -428,7 +434,7 @@ final class NavModel {
             rtStreaming = false
             rtActive = false
             rtWarmSince = Date()
-            NSLog("[实时] 20 秒没人说话，停止送声音，连接保温 5 分钟")
+            XLog("[实时] 20 秒没人说话，停止送声音，连接保温 5 分钟")
             Task { await updateListening() }
         } else if let w = rtWarmSince, Date().timeIntervalSince(w) > 300 {
             rt.close()
@@ -461,6 +467,11 @@ final class NavModel {
     private func isEcho(_ text: String) -> Bool {
         let t = Array(text.filter { !$0.isPunctuation && !$0.isWhitespace })
         guard t.count >= 4 else { return false }
+        // 有回声消除时，用户复述雪人的话（“你知道怎么走吗”）不能被当成回声：
+        // 只在刚说完 2 秒内、而且几乎一字不差时才算
+        let strict = input.echoCancel
+        if strict && Date().timeIntervalSince(lastSpeakEnd) > 2 { return false }
+        let limit = strict ? 0.85 : 0.5
         for r in recentSpoken {
             let rs = String(r.filter { !$0.isPunctuation && !$0.isWhitespace })
             var covered = 0
@@ -469,7 +480,7 @@ final class NavModel {
                 if rs.contains(String(t[i..<i + 3])) { covered += 1 }
                 i += 1
             }
-            if Double(covered) / Double(max(1, t.count - 2)) > 0.5 { return true }
+            if Double(covered) / Double(max(1, t.count - 2)) > limit { return true }
         }
         return false
     }
@@ -489,10 +500,10 @@ final class NavModel {
         let acked = wakeAcked
         wakeAcked = false
         guard let session else { return }
-        if isEcho(text) { NSLog("[回声] 是雪人自己刚说的话，忽略：%@", text); return }
+        if isEcho(text) { XLog("[回声] 是雪人自己刚说的话，忽略：%@", text); return }
         let stripped = session.stripWake(text)
         let woke = session.hasWake(text)
-        guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
+        guard woke || Date() < commandWindowUntil else { XLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
         if useRealtime && (woke || rtStreaming) {
             commandWindowUntil = .distantPast
             commandWindowOpen = false
@@ -507,7 +518,7 @@ final class NavModel {
         }
         // 没喊雪人、只是在等回答的时候，听到很短又听不懂的词（旁边的声音、残音）就不理会
         if !woke && stripped.count <= 3 && session.understandLocal(stripped).contains("\"intent\":\"unknown\"") {
-            NSLog("[唤醒] 等回答时听到的短词，忽略：%@", stripped)
+            XLog("[唤醒] 等回答时听到的短词，忽略：%@", stripped)
             return
         }
         commandWindowUntil = .distantPast
@@ -521,6 +532,7 @@ final class NavModel {
         // 雪人用用户这句话的语言回答
         replyLang = heardLang ?? talkLang
         chat.append(ChatLine(who: .user, text: text))
+        XLog("[对话] 用户：%@", text)
         configureSession()
         var say = ""
         var awaiting = false
@@ -563,7 +575,7 @@ final class NavModel {
         }
         if via == "离线规则" {
             let intentJSON = session.understandLocal(text)
-            NSLog("[雪人] %@ → %@（离线规则）", text, intentJSON)
+            XLog("[雪人] %@ → %@（离线规则）", text, intentJSON)
             let r = session.converse(intentJSON: intentJSON, nowMs: nowMs)
             applyEvent(r.event)
             say = r.say
@@ -574,7 +586,7 @@ final class NavModel {
         if history.count > 16 { history.removeFirst(history.count - 16) }
 
         flushSpeech()
-        NSLog("[计时] 理解+回复用了 %.2f 秒（%@）", Date().timeIntervalSince(t0), via)
+        XLog("[计时] 理解+回复用了 %.2f 秒（%@）", Date().timeIntervalSince(t0), via)
         if !say.isEmpty && !streamed { reply(say, note: via) }
         // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了问题时更长）
         let speakSec = Double(say.count) / 4
@@ -639,6 +651,7 @@ final class NavModel {
 
     private func reply(_ text: String, note: String? = nil) {
         chat.append(ChatLine(who: .xueren, text: text, note: note))
+        XLog("[对话] 雪人（%@）：%@", note ?? "", text)
         rememberSpoken(text)
         speakOut(text, lang: SpeechService.languageOf(text, fallback: replyLang))
     }
@@ -795,7 +808,7 @@ final class NavModel {
             // 云端雪人已经用自己的话说了“出发”，导航自带的“开始导航，前往…”就不再念
             if item.key == "start" && cloudStartedNav { cloudStartedNav = false; continue }
             chat.append(ChatLine(who: .system, text: item.text, note: item.reason))
-            NSLog("[播报] %@", item.text)
+            XLog("[播报] %@", item.text)
             if item.voice && !paused { rememberSpoken(item.text); speakOut(item.text, lang: lang) }
         }
         if chat.count > 200 { chat.removeFirst(chat.count - 200) }
@@ -826,12 +839,12 @@ final class NavModel {
         guard let core else { return }
         let r = core.runSelfCheck()
         selfCheck = r
-        NSLog("[自检] %@", r.message)
-        for (i, t) in r.actual.enumerated() { NSLog("[自检] %02d %@", i + 1, t) }
+        XLog("[自检] %@", r.message)
+        for (i, t) in r.actual.enumerated() { XLog("[自检] %02d %@", i + 1, t) }
     }
 
     func checkCapabilities() async {
         capabilities = await DeviceCapabilities.report()
-        for line in capabilities { NSLog("[能力] %@", line) }
+        for line in capabilities { XLog("[能力] %@", line) }
     }
 }

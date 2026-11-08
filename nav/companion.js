@@ -135,8 +135,49 @@ function lcs(a, b) {
   return dp[b.length];
 }
 
+// 通用说法：山顶 / 山脚 / 餐厅。任何雪场都能用（按海拔和地点类型自动对应），
+// 这样用户不用记“かぐら第5ロマンスリフト 下车处”这种名字。
+const GENERIC = [
+  { key: 'summit', re: /(山顶|山頂|最高处|最高点|最上面|最顶上|顶上|山上面|てっぺん|頂上|summit|the top|top of)/i },
+  { key: 'base', re: /(山脚|山下|山麓|山底|最下面|ふもと|麓|base|bottom)/i },
+  { key: 'food', re: /(餐厅|饭店|吃饭|吃东西|食堂|午饭|午餐|レストラン|食事|ランチ|restaurant|lunch|food)/i }
+];
+
+export function genericPlaces(resort) {
+  const ele = (node) => resort.nodes.get(node)?.ele;
+  const withEle = resort.pois.filter((p) => ele(p.node) != null);
+  const out = {};
+  if (withEle.length) {
+    out.summit = withEle.reduce((a, b) => (ele(b.node) > ele(a.node) ? b : a));
+    const bases = withEle.filter((p) => p.kind !== 'lift-top');
+    out.base = (bases.length ? bases : withEle).reduce((a, b) => (ele(b.node) < ele(a.node) ? b : a));
+  }
+  out.food = resort.pois.filter((p) => p.kind === 'restaurant');
+  return out;
+}
+
+function resolveGeneric(resort, q, fix) {
+  const g = GENERIC.find((x) => x.re.test(q));
+  if (!g) return null;
+  const places = genericPlaces(resort);
+  if (g.key === 'food') {
+    const list = places.food;
+    if (!list.length) return null;
+    if (list.length === 1) return { node: list[0].node, name: list[0].name, guess: true };
+    // 有当前位置：选最近的；没有：列出前三个
+    if (fix) {
+      const d = (p) => { const n = resort.nodes.get(p.node); return Math.hypot(n.x - fix.x, n.y - fix.y); };
+      const near = [...list].sort((a, b) => d(a) - d(b))[0];
+      return { node: near.node, name: near.name, guess: true };
+    }
+    return { ambiguous: list.slice(0, 3).map((p) => p.name) };
+  }
+  const p = places[g.key];
+  return p ? { node: p.node, name: p.name, guess: true } : null;
+}
+
 // 地名 →返回 { node, name } / { ambiguous: [名称…] } / null
-export function resolvePlace(resort, text) {
+export function resolvePlace(resort, text, fix = null) {
   const q = (text || '').replace(/\s+/g, '');
   if (!q) return null;
   const cands = [];
@@ -159,6 +200,8 @@ export function resolvePlace(resort, text) {
     else if (q.length >= 2 && (n.name.includes(q) || q.includes(n.name))) add(n.id, n.name, 1);
   }
   if (!cands.length) {
+    const gen = resolveGeneric(resort, q, fix);
+    if (gen) return gen;
     // 模糊匹配：按读音（或字）的最长公共子序列，覆盖地名一半以上才算；结果标为 guess，要向用户确认
     const qs = sounds(q);
     const fuzzy = [];
@@ -263,7 +306,14 @@ export function createCompanion(api) {
   let lastReply = '';
   const t = () => T[api.lang() === 'ja' ? 'ja' : 'zh'];
 
-  const placeExamples = () => api.resort.pois.slice(0, 4).map((p) => (api.lang() === 'ja' && p.name_ja) || p.name).join(t().sep);
+  // 举例时少说几个：先说通用说法（山顶 / 山脚 / 餐厅），再加一两个地名
+  const placeExamples = () => {
+    const g = genericPlaces(api.resort);
+    const words = api.lang() === 'ja' ? ['山頂', 'ふもと', 'レストラン'] : ['山顶', '山脚', '餐厅'];
+    const generic = [g.summit && words[0], g.base && words[1], g.food?.length && words[2]].filter(Boolean);
+    const named = api.resort.pois.slice(0, 2).map((p) => (api.lang() === 'ja' && p.name_ja) || p.name);
+    return [...generic, ...named].slice(0, 3).join(t().sep);
+  };
   const placeName = (node) => {
     const p = api.resort.pois.find((x) => x.node === node);
     if (p) return (api.lang() === 'ja' && p.name_ja) || p.name;
@@ -304,7 +354,7 @@ export function createCompanion(api) {
 
   function planAndConfirm(intent) {
     const L = t();
-    const dest = resolvePlace(api.resort, intent.destination);
+    const dest = resolvePlace(api.resort, intent.destination, api.lastFix());
     if (!intent.destination && !pending) return fail(L.noDest(placeExamples()));
     let goal = pending?.goal;
     if (intent.destination) {
@@ -587,6 +637,9 @@ export function companionSystemPrompt(resort, lang) {
     '- 安全第一：不鼓励超出能力的难度、不建议进入关闭或未知的区域；用户说受伤、迷路、很冷很累时，建议停在安全的地方、联系雪场巡逻或同伴。',
     '- 用户只是闲聊就陪着聊，不需要调工具。',
     '',
+    '- 列举地点时最多说两三个，挑用户最可能想去的；不要念长串地名。',
+    '- 用户说“山顶 / 山脚 / 餐厅”这类通用说法时，直接把这个词传给 plan_route，程序会对应到具体地点。',
+    `通用说法对应：${(() => { const g = genericPlaces(resort); const ele = (p) => resort.nodes.get(p.node)?.ele; return [g.summit && `山顶 = ${g.summit.name}（海拔约${Math.round(ele(g.summit))}米）`, g.base && `山脚 = ${g.base.name}`, g.food?.length ? `餐厅 = ${g.food.slice(0, 3).map((p) => p.name).join('、')}${g.food.length > 3 ? ' 等' : ''}` : ''].filter(Boolean).join('；'); })()}`,
     `雪场：${resort.name}${resort.dataStatus === 'fictional' ? '（虚构的演示雪场）' : resort.dataStatus === 'unverified' ? '（地图数据未核实，开放状态未知）' : ''}`,
     '地点表：',
     places

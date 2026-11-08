@@ -6,6 +6,8 @@ import path from 'node:path';
 import { ROOT, resort } from './helpers.mjs';
 import { rulesIntent, resolvePlace, stripWake, hasWake, brainSystemPrompt } from '../nav/companion.js';
 import { createSession } from '../nav/core-entry.js';
+import { companionSystemPrompt } from '../nav/companion.js';
+const brainSystemPromptK = (K) => companionSystemPrompt(K, 'zh');
 
 const R = resort('demo-fictional');
 const demoText = fs.readFileSync(path.join(ROOT, 'resorts/demo-fictional.json'), 'utf8');
@@ -74,6 +76,18 @@ test('对话：识别错字时猜一个地点并确认', () => {
   assert.equal(a.mode, 'confirming');
   assert.match(a.say, /^你是说山脚缆车站吧？/);
   assert.equal(talk('对').event, 'started');
+});
+
+test('通用说法：神乐的“山顶”对应海拔最高的第5ロマンスリフト下车处', () => {
+  const K = resort('kagura-osm');
+  const r = resolvePlace(K, '山顶');
+  assert.equal(r.name, 'かぐら第5ロマンスリフト 下车处');
+  assert.equal(r.guess, true);
+  const b = resolvePlace(K, '山脚');
+  assert.match(b.name, /乘车处/);
+  const f = resolvePlace(K, '我想去吃饭');
+  assert.ok(f.ambiguous || f.node);
+  assert.match(brainSystemPromptK(K), /山顶 = かぐら第5ロマンスリフト 下车处/);
 });
 
 test('地名解析：精确、别名、歧义、找不到', () => {

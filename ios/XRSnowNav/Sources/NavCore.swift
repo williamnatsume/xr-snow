@@ -111,7 +111,7 @@ final class NavCore {
         var jsError: String?
         ctx.exceptionHandler = { _, exc in
             jsError = exc?.toString()
-            NSLog("[NavCore] JS 异常：%@", exc?.toString() ?? "?")
+            XLog("[NavCore] JS 异常：%@", exc?.toString() ?? "?")
         }
         // 给 JS 用的“汉字 → 拼音”（地名模糊匹配按读音比较，语音识别写错字也能对上）
         let pinyin: @convention(block) (String) -> String = { text in
@@ -128,7 +128,7 @@ final class NavCore {
         xrnav = x
         ctx.exceptionHandler = { [weak self] _, exc in
             self?.lastError = exc?.toString()
-            NSLog("[NavCore] JS 异常：%@", exc?.toString() ?? "?")
+            XLog("[NavCore] JS 异常：%@", exc?.toString() ?? "?")
         }
     }
 
@@ -211,7 +211,7 @@ final class NavSession {
     private func decode<T: Decodable>(_ type: T.Type, _ json: String?) -> T? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         do { return try JSONDecoder().decode(T.self, from: data) } catch {
-            NSLog("[NavCore] 解析 %@ 失败：%@", String(describing: T.self), String(describing: error))
+            XLog("[NavCore] 解析 %@ 失败：%@", String(describing: T.self), String(describing: error))
             return nil
         }
     }

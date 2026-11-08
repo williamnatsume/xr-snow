@@ -200,6 +200,12 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - 保温：20 秒没人说话只停止送声音（不再产生音频 token），连接再保持 5 分钟，下次唤醒免连接；5 分钟后关闭。`rtStreaming` 才把非唤醒的话交给云端。
 - **真机实测（用户手机，-rtsay）**：连接就绪 1.0–2.0 秒，就绪后约 1 秒开口；会主动调用 plan_route（用户当时选的是神乐，没有“山腰站”，如实说找不到）；20 秒后转保温。用户亲口对话、插话尚未实测。
 
+#### 对话复盘修正（2026-11-08）
+- **通用说法**（`genericPlaces` / `resolveGeneric`，任何雪场自动生效）：山顶 = 海拔最高的地点（神乐：かぐら第5ロマンスリフト 下车处，1838 m）；山脚 = 海拔最低的非山顶站；餐厅 = kind restaurant 的地点（有当前位置时取最近）。系统提示里写明对应关系，并要求列举地点时最多两三个。
+- **“你知道怎么走吗”卡住**：最可能是文字回声过滤把用户复述雪人的话当成回声丢掉（没有日志，未能确认）。有回声消除后，文字过滤只在播报结束 2 秒内且 85% 以上重合时生效。
+- **持久日志**：`FileLog.swift`（`XLog` 替代 NSLog），写 App Documents/logs/xueren-YYYYMMDD.log，保留 7 天；对话逐句记 `[对话]`。取回：`xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer --domain-identifier io.github.williamnatsume.XRSnowNav --source Documents/logs --destination <目录>`（不需要 root，真机验证可用）。
+- 真机：实时语音“带我去山顶” → plan_route(山顶) → 对应到第5ロマンス下车处；中级上限下无路线，雪人问是否允许高级道。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。

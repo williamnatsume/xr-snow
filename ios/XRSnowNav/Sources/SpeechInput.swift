@@ -104,7 +104,7 @@ final class SpeechInput: NSObject {
                 if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) {
                     onStatus?("正在下载\(lang)语音识别模型…")
                     do { try await req.downloadAndInstall() } catch {
-                        NSLog("[语音] %@ 模型下载失败，先不用：%@", lang, error.localizedDescription)
+                        XLog("[语音] %@ 模型下载失败，先不用：%@", lang, error.localizedDescription)
                         continue
                     }
                 }
@@ -140,7 +140,7 @@ final class SpeechInput: NSObject {
                             }
                         }
                     } catch {
-                        NSLog("[语音] %@ 识别结束：%@", lang, error.localizedDescription)
+                        XLog("[语音] %@ 识别结束：%@", lang, error.localizedDescription)
                         await MainActor.run { self?.laneDied(lang) }
                     }
                 }
@@ -154,10 +154,10 @@ final class SpeechInput: NSObject {
             silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.tick() }
             }
-            NSLog("[语音] 开始听：%@，回声消除：%@", langs.joined(separator: "+"), echoCancel ? "开" : "关（改用说话时不收音）")
+            XLog("[语音] 开始听：%@，回声消除：%@", langs.joined(separator: "+"), echoCancel ? "开" : "关（改用说话时不收音）")
             onStatus?("正在听（\(langs.joined(separator: "/"))）")
         } catch {
-            NSLog("[语音] 启动失败：%@", String(describing: error))
+            XLog("[语音] 启动失败：%@", String(describing: error))
             onStatus?("语音识别启动失败：\(error.localizedDescription)")
             await stop()
         }
@@ -191,7 +191,7 @@ final class SpeechInput: NSObject {
                 AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: true, duckingLevel: .min)
             echoCancel = true
         } catch {
-            NSLog("[语音] 回声消除不可用：%@", error.localizedDescription)
+            XLog("[语音] 回声消除不可用：%@", error.localizedDescription)
             echoCancel = false
         }
         if !playerAttached {
@@ -220,7 +220,7 @@ final class SpeechInput: NSObject {
 
     private func restartEngine(_ why: String) {
         guard running else { return }
-        NSLog("[语音] 重启麦克风：%@", why)
+        XLog("[语音] 重启麦克风：%@", why)
         audioClock.tick()
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         if engine.isRunning { engine.stop() }
@@ -228,7 +228,7 @@ final class SpeechInput: NSObject {
             try AVAudioSession.sharedInstance().setActive(true)
             try startEngine()
         } catch {
-            NSLog("[语音] 重启失败：%@", error.localizedDescription)
+            XLog("[语音] 重启失败：%@", error.localizedDescription)
         }
     }
 
@@ -237,7 +237,7 @@ final class SpeechInput: NSObject {
         observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
             let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             MainActor.assumeIsolated {
-                NSLog("[语音] 音频打断：%@", raw == 1 ? "开始" : "结束")
+                XLog("[语音] 音频打断：%@", raw == 1 ? "开始" : "结束")
                 if raw == 0 { self?.restartEngine("音频打断结束") }
             }
         })
@@ -287,14 +287,14 @@ final class SpeechInput: NSObject {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(est))
             guard let self, gen == self.speakGeneration, self.pendingUtterances > 0 else { return }
-            NSLog("[语音] 播报超时，强制结束")
+            XLog("[语音] 播报超时，强制结束")
             self.utteranceDone(gen, force: true)
         }
         synth.write(u) { [weak self] buf in
             guard let pcm = buf as? AVAudioPCMBuffer else { return }
             if pcm.frameLength == 0 {
                 // 这句话合成完了：等最后一段播完再算说完
-                NSLog("[语音] 合成完成：%d 段", chunks)
+                XLog("[语音] 合成完成：%d 段", chunks)
                 p.scheduleBuffer(AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: 1)!) {
                     Task { @MainActor in self?.utteranceDone(gen) }
                 }
@@ -302,7 +302,7 @@ final class SpeechInput: NSObject {
             }
             if converter == nil {
                 converter = AVAudioConverter(from: pcm.format, to: fmt)
-                NSLog("[语音] 合成格式：%@ → 播放格式：%@", String(describing: pcm.format), String(describing: fmt))
+                XLog("[语音] 合成格式：%@ → 播放格式：%@", String(describing: pcm.format), String(describing: fmt))
             }
             guard let c = converter, let out = SpeechInput.convertBuffer(pcm, with: c, to: fmt) else { return }
             chunks += 1
@@ -375,7 +375,7 @@ final class SpeechInput: NSObject {
                 }
             }
         }
-        NSLog("[语音] %@", on ? "雪人开始说话" : "雪人说完了")
+        XLog("[语音] %@", on ? "雪人开始说话" : "雪人说完了")
         onSpeakingChanged?(on)
     }
 
@@ -408,7 +408,7 @@ final class SpeechInput: NSObject {
         lastChange = Date()
         // 雪人说话时用户喊“雪人”：打断她（插话）
         if speaking, hasWake?(text) == true {
-            NSLog("[语音] 用户插话，停止播报")
+            XLog("[语音] 用户插话，停止播报")
             stopSpeaking()
         }
         // 唤醒词在哪个语言里出现都算：优先把含唤醒词的那条交给上层
@@ -459,7 +459,7 @@ final class SpeechInput: NSObject {
         guard keep else { return }   // 旁边的人声 / 没喊雪人：丢掉
         // 雪人说话时，没有喊“雪人”的话不算（只可能是回声或旁人）
         if speaking && hasWake?(text) != true { return }
-        NSLog("[语音] 一句话（停顿 %.1f 秒%@），选 %@：%@  [%@]", quiet, tooLong ? "，超过 7 秒强制结束" : "", lang, text, summary)
+        XLog("[语音] 一句话（停顿 %.1f 秒%@），选 %@：%@  [%@]", quiet, tooLong ? "，超过 7 秒强制结束" : "", lang, text, summary)
         onUtterance?(text, lang)
     }
 }

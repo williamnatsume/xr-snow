@@ -1581,7 +1581,45 @@ var XRNav = (() => {
     }
     return dp[b.length];
   }
-  function resolvePlace(resort, text) {
+  var GENERIC = [
+    { key: "summit", re: /(山顶|山頂|最高处|最高点|最上面|最顶上|顶上|山上面|てっぺん|頂上|summit|the top|top of)/i },
+    { key: "base", re: /(山脚|山下|山麓|山底|最下面|ふもと|麓|base|bottom)/i },
+    { key: "food", re: /(餐厅|饭店|吃饭|吃东西|食堂|午饭|午餐|レストラン|食事|ランチ|restaurant|lunch|food)/i }
+  ];
+  function genericPlaces(resort) {
+    const ele = (node) => resort.nodes.get(node)?.ele;
+    const withEle = resort.pois.filter((p) => ele(p.node) != null);
+    const out = {};
+    if (withEle.length) {
+      out.summit = withEle.reduce((a, b) => ele(b.node) > ele(a.node) ? b : a);
+      const bases = withEle.filter((p) => p.kind !== "lift-top");
+      out.base = (bases.length ? bases : withEle).reduce((a, b) => ele(b.node) < ele(a.node) ? b : a);
+    }
+    out.food = resort.pois.filter((p) => p.kind === "restaurant");
+    return out;
+  }
+  function resolveGeneric(resort, q, fix) {
+    const g = GENERIC.find((x) => x.re.test(q));
+    if (!g) return null;
+    const places = genericPlaces(resort);
+    if (g.key === "food") {
+      const list = places.food;
+      if (!list.length) return null;
+      if (list.length === 1) return { node: list[0].node, name: list[0].name, guess: true };
+      if (fix) {
+        const d = (p2) => {
+          const n = resort.nodes.get(p2.node);
+          return Math.hypot(n.x - fix.x, n.y - fix.y);
+        };
+        const near = [...list].sort((a, b) => d(a) - d(b))[0];
+        return { node: near.node, name: near.name, guess: true };
+      }
+      return { ambiguous: list.slice(0, 3).map((p2) => p2.name) };
+    }
+    const p = places[g.key];
+    return p ? { node: p.node, name: p.name, guess: true } : null;
+  }
+  function resolvePlace(resort, text, fix = null) {
     const q = (text || "").replace(/\s+/g, "");
     if (!q) return null;
     const cands = [];
@@ -1604,6 +1642,8 @@ var XRNav = (() => {
       else if (q.length >= 2 && (n.name.includes(q) || q.includes(n.name))) add(n.id, n.name, 1);
     }
     if (!cands.length) {
+      const gen = resolveGeneric(resort, q, fix);
+      if (gen) return gen;
       const qs = sounds(q);
       const fuzzy = [];
       const all = [
@@ -1702,7 +1742,13 @@ var XRNav = (() => {
     let prefs = { maxDifficulty: 2, avoidFlat: false, preferShort: false };
     let lastReply = "";
     const t = () => T[api.lang() === "ja" ? "ja" : "zh"];
-    const placeExamples = () => api.resort.pois.slice(0, 4).map((p) => api.lang() === "ja" && p.name_ja || p.name).join(t().sep);
+    const placeExamples = () => {
+      const g = genericPlaces(api.resort);
+      const words = api.lang() === "ja" ? ["\u5C71\u9802", "\u3075\u3082\u3068", "\u30EC\u30B9\u30C8\u30E9\u30F3"] : ["\u5C71\u9876", "\u5C71\u811A", "\u9910\u5385"];
+      const generic = [g.summit && words[0], g.base && words[1], g.food?.length && words[2]].filter(Boolean);
+      const named = api.resort.pois.slice(0, 2).map((p) => api.lang() === "ja" && p.name_ja || p.name);
+      return [...generic, ...named].slice(0, 3).join(t().sep);
+    };
     const placeName = (node) => {
       const p = api.resort.pois.find((x) => x.node === node);
       if (p) return api.lang() === "ja" && p.name_ja || p.name;
@@ -1737,7 +1783,7 @@ var XRNav = (() => {
     }
     function planAndConfirm(intent) {
       const L = t();
-      const dest = resolvePlace(api.resort, intent.destination);
+      const dest = resolvePlace(api.resort, intent.destination, api.lastFix());
       if (!intent.destination && !pending) return fail(L.noDest(placeExamples()));
       let goal = pending?.goal;
       if (intent.destination) {
@@ -2046,6 +2092,13 @@ var XRNav = (() => {
       "- \u5B89\u5168\u7B2C\u4E00\uFF1A\u4E0D\u9F13\u52B1\u8D85\u51FA\u80FD\u529B\u7684\u96BE\u5EA6\u3001\u4E0D\u5EFA\u8BAE\u8FDB\u5165\u5173\u95ED\u6216\u672A\u77E5\u7684\u533A\u57DF\uFF1B\u7528\u6237\u8BF4\u53D7\u4F24\u3001\u8FF7\u8DEF\u3001\u5F88\u51B7\u5F88\u7D2F\u65F6\uFF0C\u5EFA\u8BAE\u505C\u5728\u5B89\u5168\u7684\u5730\u65B9\u3001\u8054\u7CFB\u96EA\u573A\u5DE1\u903B\u6216\u540C\u4F34\u3002",
       "- \u7528\u6237\u53EA\u662F\u95F2\u804A\u5C31\u966A\u7740\u804A\uFF0C\u4E0D\u9700\u8981\u8C03\u5DE5\u5177\u3002",
       "",
+      "- \u5217\u4E3E\u5730\u70B9\u65F6\u6700\u591A\u8BF4\u4E24\u4E09\u4E2A\uFF0C\u6311\u7528\u6237\u6700\u53EF\u80FD\u60F3\u53BB\u7684\uFF1B\u4E0D\u8981\u5FF5\u957F\u4E32\u5730\u540D\u3002",
+      "- \u7528\u6237\u8BF4\u201C\u5C71\u9876 / \u5C71\u811A / \u9910\u5385\u201D\u8FD9\u7C7B\u901A\u7528\u8BF4\u6CD5\u65F6\uFF0C\u76F4\u63A5\u628A\u8FD9\u4E2A\u8BCD\u4F20\u7ED9 plan_route\uFF0C\u7A0B\u5E8F\u4F1A\u5BF9\u5E94\u5230\u5177\u4F53\u5730\u70B9\u3002",
+      `\u901A\u7528\u8BF4\u6CD5\u5BF9\u5E94\uFF1A${(() => {
+        const g = genericPlaces(resort);
+        const ele = (p) => resort.nodes.get(p.node)?.ele;
+        return [g.summit && `\u5C71\u9876 = ${g.summit.name}\uFF08\u6D77\u62D4\u7EA6${Math.round(ele(g.summit))}\u7C73\uFF09`, g.base && `\u5C71\u811A = ${g.base.name}`, g.food?.length ? `\u9910\u5385 = ${g.food.slice(0, 3).map((p) => p.name).join("\u3001")}${g.food.length > 3 ? " \u7B49" : ""}` : ""].filter(Boolean).join("\uFF1B");
+      })()}`,
       `\u96EA\u573A\uFF1A${resort.name}${resort.dataStatus === "fictional" ? "\uFF08\u865A\u6784\u7684\u6F14\u793A\u96EA\u573A\uFF09" : resort.dataStatus === "unverified" ? "\uFF08\u5730\u56FE\u6570\u636E\u672A\u6838\u5B9E\uFF0C\u5F00\u653E\u72B6\u6001\u672A\u77E5\uFF09" : ""}`,
       "\u5730\u70B9\u8868\uFF1A",
       places

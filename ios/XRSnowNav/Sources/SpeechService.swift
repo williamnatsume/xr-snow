@@ -33,7 +33,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
                 try s.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
             }
         } catch {
-            NSLog("[Speech] 设置音频会话失败：%@", error.localizedDescription)
+            XLog("[Speech] 设置音频会话失败：%@", error.localizedDescription)
         }
     }
 
@@ -44,7 +44,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         guard enabled, !text.isEmpty else { return }
         if !listening {
             do { try AVAudioSession.sharedInstance().setActive(true) } catch {
-                NSLog("[Speech] 激活音频会话失败：%@", error.localizedDescription)
+                XLog("[Speech] 激活音频会话失败：%@", error.localizedDescription)
             }
         }
         let u = AVSpeechUtterance(string: text)
@@ -87,7 +87,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         if let v = voiceCache[language] { return v }
         let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == language }
         let best = all.max { a, b in a.quality.rawValue < b.quality.rawValue } ?? AVSpeechSynthesisVoice(language: language)
-        if let best { voiceCache[language] = best; NSLog("[Speech] %@ 使用声音：%@（质量 %d）", language, best.name, best.quality.rawValue) }
+        if let best { voiceCache[language] = best; XLog("[Speech] %@ 使用声音：%@（质量 %d）", language, best.name, best.quality.rawValue) }
         return best
     }
 

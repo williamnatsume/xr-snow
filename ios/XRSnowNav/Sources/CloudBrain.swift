@@ -72,18 +72,18 @@ final class CloudBrain {
             let (data, resp) = try await session.data(for: req)
             guard let http = resp as? HTTPURLResponse else { return nil }
             guard http.statusCode == 200 else {
-                NSLog("[云端] HTTP %d：%@", http.statusCode, String(data: data, encoding: .utf8)?.prefix(300).description ?? "")
+                XLog("[云端] HTTP %d：%@", http.statusCode, String(data: data, encoding: .utf8)?.prefix(300).description ?? "")
                 return nil
             }
             guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-            if obj["stop_reason"] as? String == "refusal" { NSLog("[云端] 被拒绝"); return nil }
+            if obj["stop_reason"] as? String == "refusal" { XLog("[云端] 被拒绝"); return nil }
             let blocks = obj["content"] as? [[String: Any]] ?? []
             guard let text = blocks.first(where: { $0["type"] as? String == "text" })?["text"] as? String else { return nil }
             // 校验是合法 JSON 对象
             guard let d = text.data(using: .utf8), (try? JSONSerialization.jsonObject(with: d)) is [String: Any] else { return nil }
             return text
         } catch {
-            NSLog("[云端] 请求失败：%@", error.localizedDescription)
+            XLog("[云端] 请求失败：%@", error.localizedDescription)
             return nil
         }
     }
@@ -127,7 +127,7 @@ final class CloudBrain {
             for sentence in chunker.flush() { spoken += sentence; await onSentence(sentence) }
             let stop = msg.stop
             let content = msg.content
-            if stop == "refusal" { NSLog("[云端] 被拒绝"); return spoken.isEmpty ? nil : spoken }
+            if stop == "refusal" { XLog("[云端] 被拒绝"); return spoken.isEmpty ? nil : spoken }
             if stop == "tool_use" {
                 if spoken.isEmpty && !saidFiller { saidFiller = true; await onToolStart() }
                 // 助手消息原样带回（包括 thinking 块），再附上所有工具结果
@@ -139,7 +139,7 @@ final class CloudBrain {
                     let input = block["input"] ?? [:]
                     let inputJSON = (try? JSONSerialization.data(withJSONObject: input)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                     let out = await tool(name, inputJSON)
-                    NSLog("[云端] 工具 %@ %@ → %@", name, inputJSON, out)
+                    XLog("[云端] 工具 %@ %@ → %@", name, inputJSON, out)
                     results.append(["type": "tool_result", "tool_use_id": id, "content": out])
                 }
                 messages.append(["role": "user", "content": results])
@@ -148,7 +148,7 @@ final class CloudBrain {
             let reply = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
             return reply.isEmpty ? nil : reply
         }
-        NSLog("[云端] 工具调用轮数过多")
+        XLog("[云端] 工具调用轮数过多")
         return nil
     }
 
@@ -170,7 +170,7 @@ final class CloudBrain {
             guard status == 200 else {
                 var err = ""
                 for try await line in bytes.lines { err += line; if err.count > 400 { break } }
-                NSLog("[云端] HTTP %d：%@", status, err)
+                XLog("[云端] HTTP %d：%@", status, err)
                 return nil
             }
             var blocks: [Int: [String: Any]] = [:]
@@ -214,17 +214,17 @@ final class CloudBrain {
                 case "message_delta":
                     if let d = ev["delta"] as? [String: Any], let s = d["stop_reason"] as? String { stop = s }
                 case "error":
-                    NSLog("[云端] 流错误：%@", json)
+                    XLog("[云端] 流错误：%@", json)
                     return nil
                 default: break
                 }
             }
-            NSLog("[云端] 流式完成 %.1f 秒（第一个字 %@），结束原因 %@", Date().timeIntervalSince(t0),
+            XLog("[云端] 流式完成 %.1f 秒（第一个字 %@），结束原因 %@", Date().timeIntervalSince(t0),
                   firstText.map { String(format: "%.1f 秒", $0.timeIntervalSince(t0)) } ?? "无文字", stop ?? "?")
             let content = blocks.keys.sorted().compactMap { blocks[$0] }
             return (content, stop)
         } catch {
-            NSLog("[云端] 请求失败：%@", error.localizedDescription)
+            XLog("[云端] 请求失败：%@", error.localizedDescription)
             return nil
         }
     }
@@ -241,14 +241,14 @@ final class CloudBrain {
             let t0 = Date()
             let (data, resp) = try await session.data(for: req)
             let http = resp as? HTTPURLResponse
-            NSLog("[云端] HTTP %d，%.1f 秒", http?.statusCode ?? -1, Date().timeIntervalSince(t0))
+            XLog("[云端] HTTP %d，%.1f 秒", http?.statusCode ?? -1, Date().timeIntervalSince(t0))
             guard http?.statusCode == 200 else {
-                NSLog("[云端] 错误：%@", String(data: data, encoding: .utf8)?.prefix(400).description ?? "")
+                XLog("[云端] 错误：%@", String(data: data, encoding: .utf8)?.prefix(400).description ?? "")
                 return nil
             }
             return try JSONSerialization.jsonObject(with: data) as? [String: Any]
         } catch {
-            NSLog("[云端] 请求失败：%@", error.localizedDescription)
+            XLog("[云端] 请求失败：%@", error.localizedDescription)
             return nil
         }
     }
