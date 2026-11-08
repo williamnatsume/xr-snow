@@ -154,6 +154,8 @@ final class NavModel {
         // 测试用：启动参数 -say "一句话" 可以重复多次，启动后按顺序当作用户说的话
         let args = ProcessInfo.processInfo.arguments
         let scripted = args.indices.filter { args[$0] == "-say" && $0 + 1 < args.count }.map { args[$0 + 1] }
+        // 测试用：-simspeed 20
+        if let i = args.firstIndex(of: "-simspeed"), i + 1 < args.count, let v = Double(args[i + 1]) { simSpeed = v }
         // 测试用：-dlmap "纬度,经度" 找那里的雪场并下载第一个
         if let i = args.firstIndex(of: "-dlmap"), i + 1 < args.count {
             let c = args[i + 1].split(separator: ",").compactMap { Double($0) }
@@ -216,6 +218,7 @@ final class NavModel {
     }
 
     private func configureSession() {
+        session?.setRealtimeAnnounce(useRealtime, extraSec: 1.2)
         session?.configure(mode: mode == .sim ? "sim" : "gps", startNode: simStartNode, seed: Int.random(in: 1...99_999))
     }
 
@@ -410,12 +413,13 @@ final class NavModel {
     private var rtFallbackText: String?
     private var rtStreaming = false        // 麦克风正在直送云端
     private var rtWarmSince: Date?         // 不送声音、只保持连接（下次唤醒免去连接时间）
+    private var rtListenOnReady = true
     private var rtWaitingLocal = false     // 预先连接时，等本机把这句话听完再交给云端
 
     var useRealtime: Bool { realtimeOn && hasOpenAIKey }
 
     // 建立连接（如果还没有）；连上后由 startRealtimeTurn 决定先说什么
-    private func ensureRealtime() {
+    private func ensureRealtime(listen: Bool = true) {
         guard rtSession == nil, let session, let key = OpenAIKeychain.read(), let p = session.companionPrompt() else { return }
         let tools: [[String: Any]] = (p.tools as? [[String: Any]] ?? []).map {
             ["type": "function", "name": $0["name"] ?? "", "description": $0["description"] ?? "", "parameters": $0["input_schema"] ?? [:]]
@@ -427,10 +431,14 @@ final class NavModel {
         """ + "\n【开始时的状态】" + contextLine()
         let rt = RealtimeSession()
         rtSession = rt
-        rtActive = true
+        rtListenOnReady = listen
+        rtActive = listen
         rtLastActivity = Date()
         rt.onReady = { [weak self] in
-            guard let self, !self.rtWaitingLocal else { return }
+            guard let self else { return }
+            // 只为导航播报连上：不开麦克风，保持连接（等用户喊“雪人”再说话）
+            if !self.rtListenOnReady { self.rtWarmSince = Date(); self.rtActive = false; return }
+            guard !self.rtWaitingLocal else { return }
             self.rtReady()
         }
         rt.onAudio = { [weak self] pcm in self?.input.playRealtime(pcm) }
@@ -463,6 +471,19 @@ final class NavModel {
             return out
         }
         rt.onActivity = { [weak self] in self?.rtLastActivity = Date() }
+        rt.onAnnounceSpoken = { [weak self] original, spoken in
+            guard let self else { return }
+            XLog("[播报] 实时语音：%@（原文：%@）", spoken, original)
+            if !self.announceMatches(original, spoken) {
+                XLog("[播报] 方向和原文不一致，本机纠正：%@", original)
+                self.speakOut(original, lang: self.lang)
+            }
+        }
+        rt.onCancelPlayback = { [weak self] in
+            guard let self, self.input.speaking else { return }
+            let played = self.input.interruptRealtime()
+            self.rtSession?.truncate(playedMs: played)
+        }
         rt.onClosed = { [weak self] reason in self?.rtClosed(reason) }
         rt.connect(key: key, model: rtModel, voice: rtVoice, instructions: instructions, tools: tools)
         Task { await updateListening() }
@@ -471,6 +492,7 @@ final class NavModel {
     // 一轮对话开始：text = 唤醒时本机已经听清的话（直接发文字）；greet = 只喊了“雪人”，让它打个招呼
     private func startRealtimeTurn(text: String?, greet: Bool) {
         rtWaitingLocal = false
+        rtListenOnReady = true
         rtPendingText = text
         rtPendingGreet = greet
         rtFallbackText = text
@@ -525,12 +547,43 @@ final class NavModel {
             rtWarmSince = Date()
             XLog("[实时] 20 秒没人说话，停止送声音，连接保温 5 分钟")
             Task { await updateListening() }
-        } else if let w = rtWarmSince, Date().timeIntervalSince(w) > 300 {
-            rt.close()
+        } else if let w = rtWarmSince, Date().timeIntervalSince(w) > 300, !navigating {
+            rt.close()   // 导航中一直保持连接（播报要用）
         }
     }
 
     func endRealtime() { rtSession?.close() }
+
+    // 导航播报走实时语音：1.6 秒内没出声就改用本机语音；说出来的方向和原文不一致时，本机马上纠正
+    private func announceRealtime(_ item: SpeechItem, rt: RealtimeSession) {
+        let token = UUID().uuidString
+        let urgent = item.key.hasPrefix("main:") || item.key.hasPrefix("late:") || item.key.hasPrefix("off:") || item.key.hasPrefix("arrive:")
+        let low = item.key.hasPrefix("confirm:")
+        guard rt.announce(item.text, token: token, urgent: urgent, low: low) else {
+            XLog("[播报] 忙，跳过低优先级：%@", item.text)
+            return
+        }
+        rtLastActivity = Date()
+        let text = item.text, l = lang
+        Task { @MainActor [weak self, weak rt] in
+            try? await Task.sleep(for: .milliseconds(1600))
+            guard let self, let rt, !rt.audioStarted.contains(token) else { return }
+            XLog("[播报] 实时语音 1.6 秒没出声，改用本机：%@", text)
+            rt.cancelAnnouncement(token)
+            self.speakOut(text, lang: l)
+        }
+    }
+
+    // 核对方向词：原文有“左”，说出来的也必须有“左”、不能多出“右”
+    private func announceMatches(_ original: String, _ spoken: String) -> Bool {
+        let dirs: [(String, [String])] = [("left", ["左"]), ("right", ["右"]), ("middle", ["中间", "真ん中", "中央"])]
+        for (_, words) in dirs {
+            let inOrig = words.contains { original.contains($0) }
+            let inSpoken = words.contains { spoken.contains($0) }
+            if inOrig != inSpoken { return false }
+        }
+        return true
+    }
 
     // 查东西时先应的一声（换着说）
     private func fillerLine() -> String {
@@ -750,6 +803,7 @@ final class NavModel {
 
     private func navStarted() {
         paused = false
+        if useRealtime && rtSession == nil { ensureRealtime(listen: false) }
         navStartedAt = Date()
         maxSpeed = 0
         navPlanKm = (snapshotRemainingKm() ?? 0)
@@ -900,7 +954,13 @@ final class NavModel {
             if item.key == "start" && cloudStartedNav { cloudStartedNav = false; continue }
             chat.append(ChatLine(who: .system, text: item.text, note: item.reason))
             XLog("[播报] %@", item.text)
-            if item.voice && !paused { rememberSpoken(item.text); speakOut(item.text, lang: lang) }
+            guard item.voice && !paused else { continue }
+            rememberSpoken(item.text)
+            if useRealtime, let rt = rtSession, rt.ready { announceRealtime(item, rt: rt) }
+            else {
+                if useRealtime && rtSession == nil && navigating { ensureRealtime(listen: false) }   // 下一条起用实时语音
+                speakOut(item.text, lang: lang)
+            }
         }
         if chat.count > 200 { chat.removeFirst(chat.count - 200) }
     }

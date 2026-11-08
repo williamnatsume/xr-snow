@@ -31,6 +31,8 @@ final class RealtimeSession {
     var onToolCall: ((String, String) -> String)?      // (name, argumentsJSON) → 结果 JSON
     var onClosed: ((String?) -> Void)?                  // 原因（nil = 正常关闭）
     var onActivity: (() -> Void)?
+    var onAnnounceSpoken: ((String, String) -> Void)?   // (原始播报文字, 实际说出的文字) 用来核对方向
+    var onCancelPlayback: (() -> Void)?                 // 紧急播报打断正在说的话：停播本地声音
 
     private var task: URLSessionWebSocketTask?
     private let urlSession = URLSession(configuration: .default)
@@ -80,6 +82,53 @@ final class RealtimeSession {
         send(["type": "conversation.item.create",
               "item": ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]]])
         send(["type": "response.create"])
+    }
+
+    // MARK: - 导航播报（用同一个声音、陪滑口吻说出来）
+
+    private var announceQueue: [(token: String, text: String)] = []
+    private var sentAnnounce: [String: String] = [:]                     // token → 原文（等 response.created 带回 token）
+    private var announceByResponse: [String: (token: String, text: String)] = [:]
+    private var currentResponseId: String?
+    private(set) var audioStarted: Set<String> = []     // 已经开始出声的播报 token
+
+    // urgent：岔口主提示等，正在说别的就打断；low：“好嘞，进…了”这类，忙的时候直接不说
+    @discardableResult
+    func announce(_ text: String, token: String, urgent: Bool, low: Bool = false) -> Bool {
+        if low && (responding || !announceQueue.isEmpty) { return false }
+        if responding {
+            if urgent {
+                announceQueue.insert((token, text), at: 0)
+                send(["type": "response.cancel"])
+                onCancelPlayback?()
+            } else {
+                announceQueue.append((token, text))
+            }
+            return true
+        }
+        sendAnnounce((token, text))
+        return true
+    }
+
+    private func sendAnnounce(_ a: (token: String, text: String)) {
+        sentAnnounce[a.token] = a.text
+        responding = true
+        let instr = """
+        导航播报：用户正在滑雪，马上要用到这条提示。用陪滑朋友的口吻，自然地用一句话说出下面这条提示的意思。
+        必须保留方向（靠左 / 靠右 / 走中间那条）和距离数字，不能改动、不能省略；雪道和缆车的名字照原文读（日文名字用日语读音）。
+        不要提问，不要加别的话，越短越好，语速轻快。提示：「\(a.text)」
+        """
+        // metadata 带上 token：response.created 里会带回来，播报和回答一一对应（排队、打断时不会串）
+        send(["type": "response.create", "response": ["instructions": instr, "tool_choice": "none", "metadata": ["announce": a.token]]])
+    }
+
+    func cancelAnnouncement(_ token: String) {
+        if let rid = announceByResponse.first(where: { $0.value.token == token })?.key {
+            send(["type": "response.cancel", "response_id": rid])
+            announceByResponse[rid] = nil     // 已经改用本机说了：不再核对，避免重复纠正
+        }
+        sentAnnounce[token] = nil
+        announceQueue.removeAll { $0.token == token }
     }
 
     // 只喊了“雪人”：让它先打个招呼
@@ -149,8 +198,16 @@ final class RealtimeSession {
             }
         case "response.created":
             responding = true
+            let rid = (ev["response"] as? [String: Any])?["id"] as? String
+            currentResponseId = rid
+            let meta = (ev["response"] as? [String: Any])?["metadata"] as? [String: Any]
+            if let token = meta?["announce"] as? String, let rid {
+                if let text = sentAnnounce.removeValue(forKey: token) { announceByResponse[rid] = (token, text) }
+                else { send(["type": "response.cancel", "response_id": rid]) }   // 已经改用本机说了：取消
+            }
             onActivity?()
         case "response.output_audio.delta":
+            if let rid = ev["response_id"] as? String, let a = announceByResponse[rid] { audioStarted.insert(a.token) }
             if let b64 = ev["delta"] as? String, let pcm = Data(base64Encoded: b64) {
                 currentItemId = ev["item_id"] as? String ?? currentItemId
                 onAudio?(pcm)
@@ -159,7 +216,10 @@ final class RealtimeSession {
         case "response.output_audio.done":
             onAudioDone?()
         case "response.output_audio_transcript.done":
-            if let t = ev["transcript"] as? String, !t.isEmpty { onAssistantText?(t) }
+            if let t = ev["transcript"] as? String, !t.isEmpty {
+                if let rid = ev["response_id"] as? String, let a = announceByResponse[rid] { onAnnounceSpoken?(a.text, t) }
+                else { onAssistantText?(t) }
+            }
         case "input_audio_buffer.speech_started":
             onUserSpeechStarted?()
             onActivity?()
@@ -178,11 +238,13 @@ final class RealtimeSession {
             needsResponseAfterTools = true
         case "response.done":
             responding = false
+            if let rid = (ev["response"] as? [String: Any])?["id"] as? String { announceByResponse[rid] = nil }
             // 这轮回答里调用了工具：把结果交回去，让它接着说
             if needsResponseAfterTools { needsResponseAfterTools = false; send(["type": "response.create"]) }
             if let r = ev["response"] as? [String: Any], let status = r["status"] as? String, status == "failed" {
                 XLog("[实时] 回答失败：%@", String(describing: r["status_details"] ?? ""))
             }
+            if !needsResponseAfterTools, !announceQueue.isEmpty { sendAnnounce(announceQueue.removeFirst()) }
             onActivity?()
         case "error":
             let e = ev["error"] as? [String: Any]

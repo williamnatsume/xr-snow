@@ -7,7 +7,7 @@
 import { loadResort, edgeLabel, DIFFICULTY } from './resort.js';
 import { planRoute, DEFAULT_PREFS } from './planner.js';
 import { buildManeuvers, maneuverText } from './instructions.js';
-import { Navigator, STATE_ZH, UNRELIABLE_ZH } from './navigator.js';
+import { Navigator, STATE_ZH, UNRELIABLE_ZH, NAV_CFG } from './navigator.js';
 import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
@@ -46,7 +46,7 @@ export function scenarioTexts(resortJsonText, opts) {
 
 export function createSession(resortJsonText) {
   const resort = loadResort(JSON.parse(resortJsonText));
-  let lang = 'zh', talkLang = 'zh', plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
+  let lang = 'zh', talkLang = 'zh', navLang = null, extraLead = 0, plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
   let queue = [], lastSpoken = null;
   let mode = 'sim', lastFix = null, defaultStart = null, simSeed = null;
 
@@ -67,7 +67,9 @@ export function createSession(resortJsonText) {
   };
 
   const newNav = () => new Navigator(resort, {
-    lang,
+    lang: navLang || lang,
+    // 用实时语音播报时，说出来要多花约 1 秒：提醒相应提前
+    cfg: extraLead ? { reactSec: NAV_CFG.reactSec + extraLead } : undefined,
     onSpeak: (item) => { lastSpoken = item; queue.push({ text: item.text, reason: item.reason, voice: item.voice !== false, key: item.key, t: item.t }); }
   });
 
@@ -137,6 +139,8 @@ export function createSession(resortJsonText) {
     // lang：导航播报语言（神乐用日语，因为雪道名是假名）；talkLang：用户说话和雪人回话的语言
     setLang(l) { lang = l === 'ja' ? 'ja' : 'zh'; if (nav) nav.lang = lang; },
     setTalkLang(l) { talkLang = l === 'ja' ? 'ja' : 'zh'; },
+    // 实时语音播报导航时：播报文字用说话的语言（名称保留原文，模型会按原文读音读），并提前 extraSec 秒提醒
+    setRealtimeAnnounce(on, extraSec) { navLang = on ? talkLang : null; extraLead = on ? (extraSec || 0) : 0; },
 
     // prefsJson：{ maxDifficulty, avoidFlat, preferShort }
     plan(startNode, goalNode, prefsJson) {

@@ -30,12 +30,16 @@ export function spokenName(e, lang = 'zh') {
     if (e.ref) return `${e.ref}番${e.type === 'lift' ? 'リフト' : kind}`;
     if (e.type === 'connector' && e.attr?.geometry === 'derived') return '連絡路';
     if (e.name) return e.name;
+    // 名前のないコース：難易度で呼ぶ
+    if (e.type === 'run' && e.difficulty) return { 1: '初級コース', 2: '中級コース', 3: '上級コース', 4: 'エキスパートコース' }[e.difficulty];
     return e.type === 'run' ? '名前のないコース' : '連絡路';
   }
   const kind = e.type === 'lift' ? '缆车' : e.type === 'connector' ? '步道' : '雪道';
   if (e.ref) return `${zhNumber(e.ref)}号${kind}`;
   if (e.type === 'connector' && e.attr?.geometry === 'derived') return '步道'; // 推算的连接段没有真实名称
   if (e.name) return e.name;
+  // 没有名字的雪道：按难度称呼（“靠左，中级道”比“无名雪道”有用）
+  if (e.type === 'run' && e.difficulty) return { 1: '初级道', 2: '中级道', 3: '高级道', 4: '专家道' }[e.difficulty];
   return e.type === 'run' ? '无名雪道' : '步道';
 }
 

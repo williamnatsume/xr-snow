@@ -426,12 +426,14 @@ var XRNav = (() => {
       if (e.ref) return `${e.ref}\u756A${e.type === "lift" ? "\u30EA\u30D5\u30C8" : kind2}`;
       if (e.type === "connector" && e.attr?.geometry === "derived") return "\u9023\u7D61\u8DEF";
       if (e.name) return e.name;
+      if (e.type === "run" && e.difficulty) return { 1: "\u521D\u7D1A\u30B3\u30FC\u30B9", 2: "\u4E2D\u7D1A\u30B3\u30FC\u30B9", 3: "\u4E0A\u7D1A\u30B3\u30FC\u30B9", 4: "\u30A8\u30AD\u30B9\u30D1\u30FC\u30C8\u30B3\u30FC\u30B9" }[e.difficulty];
       return e.type === "run" ? "\u540D\u524D\u306E\u306A\u3044\u30B3\u30FC\u30B9" : "\u9023\u7D61\u8DEF";
     }
     const kind = e.type === "lift" ? "\u7F06\u8F66" : e.type === "connector" ? "\u6B65\u9053" : "\u96EA\u9053";
     if (e.ref) return `${zhNumber(e.ref)}\u53F7${kind}`;
     if (e.type === "connector" && e.attr?.geometry === "derived") return "\u6B65\u9053";
     if (e.name) return e.name;
+    if (e.type === "run" && e.difficulty) return { 1: "\u521D\u7EA7\u9053", 2: "\u4E2D\u7EA7\u9053", 3: "\u9AD8\u7EA7\u9053", 4: "\u4E13\u5BB6\u9053" }[e.difficulty];
     return e.type === "run" ? "\u65E0\u540D\u96EA\u9053" : "\u6B65\u9053";
   }
   var SIDE = {
@@ -2768,7 +2770,7 @@ out tags bb;`;
   }
   function createSession(resortJsonText) {
     const resort = loadResort(JSON.parse(resortJsonText));
-    let lang = "zh", talkLang = "zh", plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
+    let lang = "zh", talkLang = "zh", navLang = null, extraLead = 0, plan = null, prefs = { ...DEFAULT_PREFS }, nav = null, sim = null;
     let queue = [], lastSpoken = null;
     let mode = "sim", lastFix = null, defaultStart = null, simSeed = null;
     const places = () => {
@@ -2786,7 +2788,9 @@ out tags bb;`;
       return list;
     };
     const newNav = () => new Navigator(resort, {
-      lang,
+      lang: navLang || lang,
+      // 用实时语音播报时，说出来要多花约 1 秒：提醒相应提前
+      cfg: extraLead ? { reactSec: NAV_CFG.reactSec + extraLead } : void 0,
       onSpeak: (item) => {
         lastSpoken = item;
         queue.push({ text: item.text, reason: item.reason, voice: item.voice !== false, key: item.key, t: item.t });
@@ -2866,6 +2870,11 @@ out tags bb;`;
       },
       setTalkLang(l) {
         talkLang = l === "ja" ? "ja" : "zh";
+      },
+      // 实时语音播报导航时：播报文字用说话的语言（名称保留原文，模型会按原文读音读），并提前 extraSec 秒提醒
+      setRealtimeAnnounce(on, extraSec) {
+        navLang = on ? talkLang : null;
+        extraLead = on ? extraSec || 0 : 0;
       },
       // prefsJson：{ maxDifficulty, avoidFlat, preferShort }
       plan(startNode, goalNode, prefsJson) {
