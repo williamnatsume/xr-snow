@@ -2115,7 +2115,7 @@ out tags bb;`;
   }
 
   // nav/companion.js
-  var INTENTS = ["navigate", "confirm", "cancel", "stop", "pause", "resume", "distance", "repeat", "easier", "where", "chat", "unknown"];
+  var INTENTS = ["navigate", "confirm", "cancel", "stop", "pause", "resume", "distance", "repeat", "easier", "where", "map", "mapClose", "chat", "unknown"];
   var INTENT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -2162,7 +2162,9 @@ out tags bb;`;
     ["repeat", /(再说一遍|再说一次|重复|没听清|刚才说什么|もう一度|もう一回)/],
     ["distance", /(多远|还有多少|还要多久|多长时间|还有几|距离|あとどれ|どのくらい|何メートル)/],
     ["easier", /(简单点|简单一点|轻松|容易点|容易一点|累了|好累|太难|太陡|簡単|楽な)/],
-    ["where", /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/]
+    ["where", /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/],
+    ["mapClose", /(关掉地图|关闭地图|收起地图|不看地图了?|地図を閉じ|マップを閉じ|close (the )?map)/i],
+    ["map", /(打开地图|看地图|看看地图|看一下地图|显示地图|地图给我看|地図を(見せ|開)|マップを(見せ|開)|(show|open) (me )?(the )?map)/i]
   ];
   var TAIL = "[\u5427\u554A\u5440\u4E86\u54C8\u7684\u561B\uFF01!\u3002.\uFF0C,\u3001\\s]*";
   var YES = "(?:\u597D\u7684|\u597D\u554A|\u597D\u5427|\u597D|\u5F00\u59CB|\u51FA\u53D1|\u8D70\u5427|\u8D70|\u53EF\u4EE5|\u884C|\u5BF9\u7684|\u5BF9|\u662F\u7684|\u662F|\u55EF|\u6CA1\u95EE\u9898|ok|okay|go|yes|sure|\u306F\u3044|\u3046\u3093|\u304A\u9858\u3044|\u30B9\u30BF\u30FC\u30C8|\u884C\u3053\u3046)";
@@ -2341,6 +2343,10 @@ out tags bb;`;
       distance: (d, next, rem) => `${next ? `${next}\u3002` : ""}${rem != null ? `\u5230\u76EE\u7684\u5730\u8FD8\u6709\u7EA6${rem}\u3002` : ""}`,
       arrivedAlready: "\u5DF2\u7ECF\u5230\u8FBE\u76EE\u7684\u5730\u4E86\u3002",
       where: (edge) => `\u4F60\u73B0\u5728\u5927\u6982\u5728${edge}\u3002`,
+      whereFork: (edge, d) => `\u4F60\u73B0\u5728\u5927\u6982\u5728${edge}\uFF0C\u5F80\u4E0B\u7EA6${d}\u7C73\u6709\u4E2A\u5C94\u53E3\u3002`,
+      whereFar: "\u4F60\u73B0\u5728\u4E0D\u5728\u8FD9\u4E2A\u96EA\u573A\u7684\u5730\u56FE\u8303\u56F4\u91CC\u3002",
+      mapOpen: "\u5730\u56FE\u6253\u5F00\u4E86\u3002",
+      mapClosed: "\u5730\u56FE\u6536\u8D77\u6765\u4E86\u3002",
       whereUnknown: "\u6682\u65F6\u65E0\u6CD5\u786E\u5B9A\u4F60\u5728\u54EA\u6761\u96EA\u9053\u4E0A\u3002",
       easierNone: "\u5DF2\u7ECF\u662F\u6700\u7B80\u5355\u7684\u8DEF\u7EBF\u4E86\u3002",
       easierNoRoute: (diff, to) => `\u53BB${to}\u6CA1\u6709\u53EA\u8D70${diff}\u7684\u8DEF\u7EBF\uFF0C\u7EE7\u7EED\u6309\u539F\u6765\u7684\u8DEF\u7EBF\u8D70\u3002`,
@@ -2369,6 +2375,10 @@ out tags bb;`;
       distance: (d, next, rem) => `${next ? `${next}\u3002` : ""}${rem != null ? `\u76EE\u7684\u5730\u307E\u3067\u3042\u3068\u7D04${rem}\u3067\u3059\u3002` : ""}`,
       arrivedAlready: "\u3082\u3046\u76EE\u7684\u5730\u306B\u7740\u3044\u3066\u3044\u307E\u3059\u3002",
       where: (edge) => `\u4ECA\u306F\u304A\u305D\u3089\u304F${edge}\u306B\u3044\u307E\u3059\u3002`,
+      whereFork: (edge, d) => `\u4ECA\u306F\u304A\u305D\u3089\u304F${edge}\u3002\u3042\u3068${d}m\u304F\u3089\u3044\u3067\u5206\u5C90\u3060\u3088\u3002`,
+      whereFar: "\u4ECA\u306F\u3053\u306E\u30B9\u30AD\u30FC\u5834\u306E\u5730\u56F3\u306E\u5916\u306B\u3044\u308B\u307F\u305F\u3044\u3002",
+      mapOpen: "\u5730\u56F3\u3092\u958B\u3044\u305F\u3088\u3002",
+      mapClosed: "\u5730\u56F3\u3092\u9589\u3058\u305F\u3088\u3002",
       whereUnknown: "\u4ECA\u3069\u306E\u30B3\u30FC\u30B9\u306B\u3044\u308B\u304B\u7279\u5B9A\u3067\u304D\u307E\u305B\u3093\u3002",
       easierNone: "\u3059\u3067\u306B\u4E00\u756A\u3084\u3055\u3057\u3044\u30EB\u30FC\u30C8\u3067\u3059\u3002",
       easierNoRoute: (diff, to) => `${to}\u307E\u3067${diff}\u3060\u3051\u306E\u30EB\u30FC\u30C8\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u4ECA\u306E\u30EB\u30FC\u30C8\u3092\u7D9A\u3051\u307E\u3059\u3002`,
@@ -2410,6 +2420,29 @@ out tags bb;`;
         if (d <= 150 && (!best || d < best.d)) best = { node: n.id, d };
       }
       return best ? { startNode: best.node, label: placeName(best.node) } : null;
+    }
+    function here() {
+      const fix = api.lastFix();
+      if (!fix) return null;
+      const tol = Math.max(40, (fix.acc || 10) * 1.5);
+      const cands = matchFix(api.resort, fix, { heading: null, moving: false, prevEdge: null }).filter((x) => x.d <= tol);
+      const c = cands.find((x) => x.edge.type !== "lift") || cands[0];
+      if (!c) {
+        const loc = locateStart();
+        return loc ? { label: loc.label, edgeId: null, forkNode: null, forkDist: null } : { label: null, far: true };
+      }
+      let edge = c.edge, dist2 = Math.max(0, (edge.length || 0) - c.s), node = edge.to;
+      const seen = /* @__PURE__ */ new Set([edge.id]);
+      for (let i = 0; i < 30 && dist2 < 3e3; i++) {
+        const outs = (api.resort.out.get(node) || []).filter((e) => e.type !== "lift" && e.open !== false);
+        if (outs.length >= 2) return { label: api.edgeLabel(c.edge), edgeId: c.edge.id, forkNode: node, forkDist: dist2 };
+        if (outs.length !== 1 || seen.has(outs[0].id)) break;
+        edge = outs[0];
+        seen.add(edge.id);
+        dist2 += edge.length || 0;
+        node = edge.to;
+      }
+      return { label: api.edgeLabel(c.edge), edgeId: c.edge.id, forkNode: null, forkDist: null };
     }
     function summarize2(p, fromLabel, goal) {
       const L = t();
@@ -2534,9 +2567,15 @@ out tags bb;`;
         case "where": {
           const e = api.isNavigating() ? api.currentEdge() : null;
           if (e) return say(L.where(api.edgeLabel(e)));
-          const loc = api.usesGps() ? locateStart() : null;
-          return say(loc ? L.where(loc.label) : L.whereUnknown);
+          const h = api.usesGps() ? here() : null;
+          if (h?.far) return say(L.whereFar);
+          if (!h?.label) return say(L.whereUnknown);
+          return say(h.forkDist != null && h.forkDist <= 2e3 ? L.whereFork(h.label, Math.max(10, Math.round(h.forkDist / 10) * 10)) : L.where(h.label));
         }
+        case "map":
+          return say(L.mapOpen, { event: "map_open" });
+        case "mapClose":
+          return say(L.mapClosed, { event: "map_close" });
         case "easier": {
           const cur = (pending?.prefs || api.navPrefs() || prefs).maxDifficulty || prefs.maxDifficulty;
           if (cur <= 1) return say(L.easierNone);
@@ -2577,7 +2616,15 @@ out tags bb;`;
       };
     }
     function statusFacts() {
-      if (!api.isNavigating()) return { navigating: false, mode, pending_route: facts() };
+      if (!api.isNavigating()) {
+        const h = api.usesGps() ? here() : null;
+        return {
+          navigating: false,
+          mode,
+          pending_route: facts(),
+          where: h ? h.far ? { outside_map: true } : { near: h.label, next_fork_m: h.forkDist != null ? Math.round(h.forkDist / 10) * 10 : null } : null
+        };
+      }
       const s = api.snapshot();
       const e = api.currentEdge();
       const d = s.distToNext != null ? Math.round(s.distToNext / 10) * 10 : null;
@@ -2629,6 +2676,9 @@ out tags bb;`;
           r = handle({ ...EMPTY, intent });
           return { ok: !!r.event, ref: r.say, event: r.event || null };
         }
+        case "show_map":
+          r = handle({ ...EMPTY, intent: a.open === false ? "mapClose" : "map" });
+          return { ok: true, event: r.event, note: "\u5730\u56FE\u5DF2\u5728\u624B\u673A\u4E0A" + (a.open === false ? "\u6536\u8D77" : "\u6253\u5F00") + "\uFF0C\u7B80\u77ED\u544A\u8BC9\u7528\u6237\u5373\u53EF" };
         case "get_status":
           return statusFacts();
         case "repeat_instruction": {
@@ -2649,6 +2699,7 @@ out tags bb;`;
       get pending() {
         return pending;
       },
+      here,
       get prefs() {
         return { ...prefs };
       },
@@ -2674,7 +2725,7 @@ out tags bb;`;
       "- navigate\uFF1A\u60F3\u53BB\u67D0\u5730\uFF0C\u6216\u4FEE\u6539\u8DEF\u7EBF\u6761\u4EF6\uFF08\u96BE\u5EA6\u3001\u907F\u5F00\u5E73\u8DEF\u3001\u6700\u77ED\uFF09\u3002destination \u586B\u5730\u70B9\u8868\u91CC\u7684\u540D\u79F0\uFF08\u7528\u8868\u91CC\u5199\u6CD5\uFF09\uFF1B\u7528\u6237\u8BF4\u4E86\u51FA\u53D1\u5730\u624D\u586B start\u3002",
       "- confirm\uFF1A\u540C\u610F/\u786E\u8BA4\u51FA\u53D1\uFF08\u597D\u3001\u8D70\u5427\u3001\u53EF\u4EE5\uFF09\u3002cancel\uFF1A\u4E0D\u8981\u3001\u7B97\u4E86\u3002",
       "- stop\uFF1A\u7ED3\u675F\u5BFC\u822A\u3002pause / resume\uFF1A\u6682\u505C / \u7EE7\u7EED\u5BFC\u822A\u3002",
-      "- distance\uFF1A\u95EE\u8FD8\u6709\u591A\u8FDC/\u591A\u4E45\u3002repeat\uFF1A\u6CA1\u542C\u6E05\u3001\u518D\u8BF4\u4E00\u904D\u3002easier\uFF1A\u60F3\u8D70\u66F4\u7B80\u5355/\u8F7B\u677E\u7684\u8DEF\u3002where\uFF1A\u95EE\u81EA\u5DF1\u5728\u54EA\u3002",
+      "- distance\uFF1A\u95EE\u8FD8\u6709\u591A\u8FDC/\u591A\u4E45\u3002repeat\uFF1A\u6CA1\u542C\u6E05\u3001\u518D\u8BF4\u4E00\u904D\u3002easier\uFF1A\u60F3\u8D70\u66F4\u7B80\u5355/\u8F7B\u677E\u7684\u8DEF\u3002where\uFF1A\u95EE\u81EA\u5DF1\u5728\u54EA\u3002map / mapClose\uFF1A\u6253\u5F00 / \u6536\u8D77\u624B\u673A\u4E0A\u7684\u96EA\u573A\u5730\u56FE\u3002",
       "- chat\uFF1A\u95F2\u804A\u3001\u6253\u62DB\u547C\u3001\u60C5\u7EEA\u8868\u8FBE\u3001\u4E0E\u5BFC\u822A\u65E0\u5173\u7684\u95EE\u9898\u3002reply \u586B\u4E00\u53E5\u7B80\u77ED\u53CB\u597D\u7684\u56DE\u590D\uFF08\u4E0D\u8D85\u8FC7 40 \u5B57\uFF0C\u7528\u7528\u6237\u7684\u8BED\u8A00\uFF09\uFF0C\u4E0D\u8981\u7ED9\u4EFB\u4F55\u8DEF\u7EBF\u6216\u96EA\u9053\u5EFA\u8BAE\uFF0C\u4E0D\u8981\u7F16\u9020\u96EA\u573A\u4FE1\u606F\u3002",
       "- unknown\uFF1A\u542C\u4E0D\u61C2\u6216\u8BED\u97F3\u8BC6\u522B\u660E\u663E\u9519\u4E71\u3002",
       "",
@@ -2714,6 +2765,7 @@ out tags bb;`;
       input_schema: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["stop", "pause", "resume"] } }, required: ["action"] }
     },
     { name: "get_status", description: "\u67E5\u5BFC\u822A\u72B6\u6001\uFF1A\u4E0B\u4E00\u6761\u63D0\u793A\u3001\u5230\u4E0B\u4E00\u4E2A\u5C94\u53E3\u7684\u8DDD\u79BB\u3001\u5269\u4F59\u8DDD\u79BB\u3001\u901F\u5EA6\u3001\u6240\u5728\u96EA\u9053\u3001\u5B9A\u4F4D\u662F\u5426\u53EF\u9760\u3002\u7528\u6237\u95EE\u8FD8\u6709\u591A\u8FDC\u3001\u5728\u54EA\u3001\u591A\u5FEB\u65F6\u8C03\u7528\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } },
+    { name: "show_map", description: "\u5728\u7528\u6237\u624B\u673A\u4E0A\u6253\u5F00\u6216\u6536\u8D77\u96EA\u573A\u5730\u56FE\uFF08\u536B\u661F\u56FE\u4E0A\u753B\u7740\u96EA\u9053\u3001\u8DEF\u7EBF\u3001\u7528\u6237\u4F4D\u7F6E\u548C\u4E0B\u4E00\u4E2A\u5C94\u53E3\uFF09\u3002\u7528\u6237\u8BF4\u770B\u5730\u56FE\u3001\u7ED9\u6211\u770B\u770B\u8DEF\u7EBF\u3001\u6211\u5728\u54EA\u7ED9\u6211\u770B\u770B\u65F6\u8C03\u7528\uFF1Bopen=false \u6536\u8D77\u3002", input_schema: { type: "object", additionalProperties: false, properties: { open: { type: "boolean" } }, required: ["open"] } },
     { name: "repeat_instruction", description: "\u7528\u6237\u6CA1\u542C\u6E05\u5BFC\u822A\u63D0\u793A\u65F6\uFF0C\u53D6\u5F53\u524D\u7684\u5BFC\u822A\u63D0\u793A\u539F\u6587\u3002", input_schema: { type: "object", additionalProperties: false, properties: {}, required: [] } }
   ];
   function companionSystemPrompt(resort, lang) {
@@ -3040,13 +3092,40 @@ out tags bb;`;
         const geo = !!resort.proj;
         const coord = (p) => geo ? (({ lat, lon }) => [lat, lon])(resort.proj.toLatLon(p.x, p.y)) : [p.x, p.y];
         const fix = nav?.lastFix || (!sim ? lastFix : null);
-        let next = null;
-        if (nav && nav.state !== "idle" && nav.state !== "arrived") {
-          const m = nav.snapshot(sim ? sim.t : nowMs).next;
-          if (m?.nodeId && resort.nodes.get(m.nodeId)) next = coord(resort.nodes.get(m.nodeId));
+        const at = (id) => id && resort.nodes.get(id) ? coord(resort.nodes.get(id)) : null;
+        let next = null, near = null, forkDist = null, far = false;
+        const active = nav && nav.state !== "idle";
+        if (active && nav.state !== "arrived") {
+          const s = nav.snapshot(sim ? sim.t : nowMs);
+          next = at(s.next?.nodeId);
+          forkDist = s.distToNext ?? null;
+          near = s.matched?.edge ? edgeLabel(s.matched.edge) : null;
+        } else if (!active && fix) {
+          const h = companion.here();
+          if (h?.far) far = true;
+          else if (h) {
+            near = h.label;
+            forkDist = h.forkDist;
+            next = at(h.forkNode);
+          }
         }
-        const route = nav?.route ? nav.route.slice(nav.idx).map((e) => e.id) : plan && !nav ? plan.edges.map((e) => e.id) : [];
-        return J({ route, pos: fix ? coord(fix) : null, acc: fix?.acc ?? null, next, dest: plan?.destNode && resort.nodes.get(plan.destNode) ? coord(resort.nodes.get(plan.destNode)) : null });
+        const pend = !active ? companion.pending : null;
+        const preview = !!pend?.plan;
+        const route = active ? nav.route.slice(nav.idx).map((e) => e.id) : preview ? pend.plan.edges.map((e) => e.id) : [];
+        const dest = active ? at(nav.destNode) : preview ? at(pend.goal) : null;
+        return J({
+          route,
+          preview,
+          pos: fix ? coord(fix) : null,
+          acc: fix?.acc ?? null,
+          next,
+          dest,
+          near,
+          forkDist,
+          far,
+          km: preview ? Math.round(pend.plan.length / 100) / 10 : null,
+          min: preview ? Math.max(1, Math.round(pend.plan.time / 60)) : null
+        });
       },
       snapshot(nowMs) {
         if (!nav) return J({ state: "idle", stateZh: STATE_ZH.idle });

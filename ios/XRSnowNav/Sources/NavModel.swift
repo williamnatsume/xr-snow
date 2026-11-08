@@ -13,6 +13,7 @@ struct ChatLine: Identifiable {
     let who: Who
     var text: String
     var note: String? = nil
+    let at = Date()
 }
 
 @MainActor
@@ -744,13 +745,15 @@ final class NavModel {
         openCommandWindow(seconds: (awaiting ? 12 : 8) + speakSec)
         await updateListening()
         refresh()
+        showPreviewIfNew()
     }
 
     // 云端工具执行后的副作用（开始 / 结束导航要启动或停止计时器）
     private func applyToolEvent(_ json: String) {
         guard let d = json.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-              let ev = obj["event"] as? String else { return }
+              let ev = obj["event"] as? String else { showPreviewIfNew(); return }
         if ev == "started" { cloudStartedNav = true }
+        showPreviewIfNew()
         applyEvent(ev)
     }
 
@@ -760,6 +763,8 @@ final class NavModel {
         case "stopped": navStopped()
         case "paused": paused = true; stopTalking()
         case "resumed": paused = false
+        case "map_open": openMap()
+        case "map_close": mapOpen = false
         default: break
         }
     }
@@ -851,6 +856,34 @@ final class NavModel {
     }
 
     func openMap() { mapState = session?.mapState(nowMs: nowMs); mapOpen = true }
+
+    // 雪人规划出新路线（还没出发）时自动打开地图给用户看；同一条路线用户关掉后不再弹
+    private var lastPreview: [String] = []
+    private func showPreviewIfNew() {
+        guard let st = session?.mapState(nowMs: nowMs) else { return }
+        if mapOpen { mapState = st; return }
+        guard st.preview == true, st.route != lastPreview else { return }
+        lastPreview = st.route
+        mapState = st
+        mapOpen = true
+    }
+
+    // 地图上的按钮：出发 / 不要这条路线（和说“好”“算了”效果一样）
+    func mapConfirm(_ go: Bool) {
+        guard let session else { return }
+        configureSession()
+        let out = session.tool(go ? "start_navigation" : "cancel_route", argsJSON: "{}", nowMs: nowMs)
+        chat.append(ChatLine(who: .user, text: go ? "出发（地图）" : "不要这条路线（地图）"))
+        applyToolEvent(out)
+        if !go { reply(talkLang == "ja" ? "わかった、やめとくね。" : "好，不走这条了。", note: "地图") }
+        flushSpeech()
+        refresh()
+    }
+
+    // 地图上点地点 → “去这里”，交给雪人规划（和说“去 X”一样，会先确认）
+    func goTo(_ place: String) {
+        submitText("去\(place)")
+    }
 
     func simWrongBranch() { session?.simWrongBranch() }
     func simOutage() { session?.simOutage(seconds: 12) }

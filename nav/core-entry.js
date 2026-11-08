@@ -258,13 +258,27 @@ export function createSession(resortJsonText) {
       const geo = !!resort.proj;
       const coord = (p) => (geo ? (({ lat, lon }) => [lat, lon])(resort.proj.toLatLon(p.x, p.y)) : [p.x, p.y]);
       const fix = nav?.lastFix || (!sim ? lastFix : null);
-      let next = null;
-      if (nav && nav.state !== 'idle' && nav.state !== 'arrived') {
-        const m = nav.snapshot(sim ? sim.t : nowMs).next;
-        if (m?.nodeId && resort.nodes.get(m.nodeId)) next = coord(resort.nodes.get(m.nodeId));
+      const at = (id) => (id && resort.nodes.get(id) ? coord(resort.nodes.get(id)) : null);
+      let next = null, near = null, forkDist = null, far = false;
+      const active = nav && nav.state !== 'idle';
+      if (active && nav.state !== 'arrived') {
+        const s = nav.snapshot(sim ? sim.t : nowMs);
+        next = at(s.next?.nodeId);
+        forkDist = s.distToNext ?? null;
+        near = s.matched?.edge ? edgeLabel(s.matched.edge) : null;
+      } else if (!active && fix) {
+        // 没在导航：所在雪道和往下的下一个岔口
+        const h = companion.here();
+        if (h?.far) far = true;
+        else if (h) { near = h.label; forkDist = h.forkDist; next = at(h.forkNode); }
       }
-      const route = nav?.route ? nav.route.slice(nav.idx).map((e) => e.id) : (plan && !nav ? plan.edges.map((e) => e.id) : []);
-      return J({ route, pos: fix ? coord(fix) : null, acc: fix?.acc ?? null, next, dest: plan?.destNode && resort.nodes.get(plan.destNode) ? coord(resort.nodes.get(plan.destNode)) : null });
+      // 雪人刚规划、还没出发的路线（预览，用户说“出发”才开始）
+      const pend = !active ? companion.pending : null;
+      const preview = !!pend?.plan;
+      const route = active ? nav.route.slice(nav.idx).map((e) => e.id) : preview ? pend.plan.edges.map((e) => e.id) : [];
+      const dest = active ? at(nav.destNode) : preview ? at(pend.goal) : null;
+      return J({ route, preview, pos: fix ? coord(fix) : null, acc: fix?.acc ?? null, next, dest, near, forkDist, far,
+        km: preview ? Math.round(pend.plan.length / 100) / 10 : null, min: preview ? Math.max(1, Math.round(pend.plan.time / 60)) : null });
     },
 
     snapshot(nowMs) {

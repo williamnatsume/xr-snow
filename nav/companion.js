@@ -12,7 +12,7 @@ import { parseRequest } from './nlp.js';
 import { DIFFICULTY } from './resort.js';
 import { matchFix } from './matcher.js';
 
-export const INTENTS = ['navigate', 'confirm', 'cancel', 'stop', 'pause', 'resume', 'distance', 'repeat', 'easier', 'where', 'chat', 'unknown'];
+export const INTENTS = ['navigate', 'confirm', 'cancel', 'stop', 'pause', 'resume', 'distance', 'repeat', 'easier', 'where', 'map', 'mapClose', 'chat', 'unknown'];
 
 export const INTENT_SCHEMA = {
   type: 'object',
@@ -71,6 +71,8 @@ const RULES = [
   ['distance', /(多远|还有多少|还要多久|多长时间|还有几|距离|あとどれ|どのくらい|何メートル)/],
   ['easier', /(简单点|简单一点|轻松|容易点|容易一点|累了|好累|太难|太陡|簡単|楽な)/],
   ['where', /(我在哪|在哪里|这是哪|现在在哪|ここはどこ|今どこ)/],
+  ['mapClose', /(关掉地图|关闭地图|收起地图|不看地图了?|地図を閉じ|マップを閉じ|close (the )?map)/i],
+  ['map', /(打开地图|看地图|看看地图|看一下地图|显示地图|地图给我看|地図を(見せ|開)|マップを(見せ|開)|(show|open) (me )?(the )?map)/i],
 ];
 // 确认 / 取消：只有整句就是这类短回答时才算（“走，我们去山脚”不是确认，是新目的地）
 const TAIL = '[吧啊呀了哈的嘛！!。.，,、\\s]*';
@@ -262,6 +264,10 @@ const T = {
     distance: (d, next, rem) => `${next ? `${next}。` : ''}${rem != null ? `到目的地还有约${rem}。` : ''}`,
     arrivedAlready: '已经到达目的地了。',
     where: (edge) => `你现在大概在${edge}。`,
+    whereFork: (edge, d) => `你现在大概在${edge}，往下约${d}米有个岔口。`,
+    whereFar: '你现在不在这个雪场的地图范围里。',
+    mapOpen: '地图打开了。',
+    mapClosed: '地图收起来了。',
     whereUnknown: '暂时无法确定你在哪条雪道上。',
     easierNone: '已经是最简单的路线了。',
     easierNoRoute: (diff, to) => `去${to}没有只走${diff}的路线，继续按原来的路线走。`,
@@ -291,6 +297,10 @@ const T = {
     distance: (d, next, rem) => `${next ? `${next}。` : ''}${rem != null ? `目的地まであと約${rem}です。` : ''}`,
     arrivedAlready: 'もう目的地に着いています。',
     where: (edge) => `今はおそらく${edge}にいます。`,
+    whereFork: (edge, d) => `今はおそらく${edge}。あと${d}mくらいで分岐だよ。`,
+    whereFar: '今はこのスキー場の地図の外にいるみたい。',
+    mapOpen: '地図を開いたよ。',
+    mapClosed: '地図を閉じたよ。',
     whereUnknown: '今どのコースにいるか特定できません。',
     easierNone: 'すでに一番やさしいルートです。',
     easierNoRoute: (diff, to) => `${to}まで${diff}だけのルートはありません。今のルートを続けます。`,
@@ -338,6 +348,28 @@ export function createCompanion(api) {
       if (d <= 150 && (!best || d < best.d)) best = { node: n.id, d };
     }
     return best ? { startNode: best.node, label: placeName(best.node) } : null;
+  }
+
+  // 没在导航时“我在哪”：所在雪道 / 缆车，以及沿着往下到下一个岔口的距离（地图和“我在哪”共用）
+  function here() {
+    const fix = api.lastFix();
+    if (!fix) return null;
+    const tol = Math.max(40, (fix.acc || 10) * 1.5);
+    const cands = matchFix(api.resort, fix, { heading: null, moving: false, prevEdge: null }).filter((x) => x.d <= tol);
+    const c = cands.find((x) => x.edge.type !== 'lift') || cands[0];
+    if (!c) {
+      const loc = locateStart();
+      return loc ? { label: loc.label, edgeId: null, forkNode: null, forkDist: null } : { label: null, far: true };
+    }
+    let edge = c.edge, dist = Math.max(0, (edge.length || 0) - c.s), node = edge.to;
+    const seen = new Set([edge.id]);
+    for (let i = 0; i < 30 && dist < 3000; i++) {
+      const outs = (api.resort.out.get(node) || []).filter((e) => e.type !== 'lift' && e.open !== false);
+      if (outs.length >= 2) return { label: api.edgeLabel(c.edge), edgeId: c.edge.id, forkNode: node, forkDist: dist };
+      if (outs.length !== 1 || seen.has(outs[0].id)) break;
+      edge = outs[0]; seen.add(edge.id); dist += edge.length || 0; node = edge.to;
+    }
+    return { label: api.edgeLabel(c.edge), edgeId: c.edge.id, forkNode: null, forkDist: null };
   }
 
   function summarize(p, fromLabel, goal) {
@@ -455,9 +487,15 @@ export function createCompanion(api) {
       case 'where': {
         const e = api.isNavigating() ? api.currentEdge() : null;
         if (e) return say(L.where(api.edgeLabel(e)));
-        const loc = api.usesGps() ? locateStart() : null;
-        return say(loc ? L.where(loc.label) : L.whereUnknown);
+        const h = api.usesGps() ? here() : null;
+        if (h?.far) return say(L.whereFar);
+        if (!h?.label) return say(L.whereUnknown);
+        return say(h.forkDist != null && h.forkDist <= 2000 ? L.whereFork(h.label, Math.max(10, Math.round(h.forkDist / 10) * 10)) : L.where(h.label));
       }
+      case 'map':
+        return say(L.mapOpen, { event: 'map_open' });
+      case 'mapClose':
+        return say(L.mapClosed, { event: 'map_close' });
       case 'easier': {
         const cur = (pending?.prefs || api.navPrefs() || prefs).maxDifficulty || prefs.maxDifficulty;
         if (cur <= 1) return say(L.easierNone);
@@ -499,7 +537,13 @@ export function createCompanion(api) {
   }
 
   function statusFacts() {
-    if (!api.isNavigating()) return { navigating: false, mode, pending_route: facts() };
+    if (!api.isNavigating()) {
+      const h = api.usesGps() ? here() : null;
+      return {
+        navigating: false, mode, pending_route: facts(),
+        where: h ? (h.far ? { outside_map: true } : { near: h.label, next_fork_m: h.forkDist != null ? Math.round(h.forkDist / 10) * 10 : null }) : null
+      };
+    }
     const s = api.snapshot();
     const e = api.currentEdge();
     const d = s.distToNext != null ? Math.round(s.distToNext / 10) * 10 : null;
@@ -541,6 +585,9 @@ export function createCompanion(api) {
         r = handle({ ...EMPTY, intent });
         return { ok: !!r.event, ref: r.say, event: r.event || null };
       }
+      case 'show_map':
+        r = handle({ ...EMPTY, intent: a.open === false ? 'mapClose' : 'map' });
+        return { ok: true, event: r.event, note: '地图已在手机上' + (a.open === false ? '收起' : '打开') + '，简短告诉用户即可' };
       case 'get_status':
         return statusFacts();
       case 'repeat_instruction': {
@@ -558,6 +605,7 @@ export function createCompanion(api) {
     status: statusFacts,
     get mode() { return mode; },
     get pending() { return pending; },
+    here,
     get prefs() { return { ...prefs }; },
     setPrefs(p) { prefs = { ...prefs, ...p }; },
     reset() { mode = 'idle'; pending = null; }
@@ -578,7 +626,7 @@ export function brainSystemPrompt(resort, lang) {
     '- navigate：想去某地，或修改路线条件（难度、避开平路、最短）。destination 填地点表里的名称（用表里写法）；用户说了出发地才填 start。',
     '- confirm：同意/确认出发（好、走吧、可以）。cancel：不要、算了。',
     '- stop：结束导航。pause / resume：暂停 / 继续导航。',
-    '- distance：问还有多远/多久。repeat：没听清、再说一遍。easier：想走更简单/轻松的路。where：问自己在哪。',
+    '- distance：问还有多远/多久。repeat：没听清、再说一遍。easier：想走更简单/轻松的路。where：问自己在哪。map / mapClose：打开 / 收起手机上的雪场地图。',
     '- chat：闲聊、打招呼、情绪表达、与导航无关的问题。reply 填一句简短友好的回复（不超过 40 字，用用户的语言），不要给任何路线或雪道建议，不要编造雪场信息。',
     '- unknown：听不懂或语音识别明显错乱。',
     '',
@@ -618,6 +666,7 @@ export const COMPANION_TOOLS = [
     input_schema: { type: 'object', additionalProperties: false, properties: { action: { type: 'string', enum: ['stop', 'pause', 'resume'] } }, required: ['action'] }
   },
   { name: 'get_status', description: '查导航状态：下一条提示、到下一个岔口的距离、剩余距离、速度、所在雪道、定位是否可靠。用户问还有多远、在哪、多快时调用。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } },
+  { name: 'show_map', description: '在用户手机上打开或收起雪场地图（卫星图上画着雪道、路线、用户位置和下一个岔口）。用户说看地图、给我看看路线、我在哪给我看看时调用；open=false 收起。', input_schema: { type: 'object', additionalProperties: false, properties: { open: { type: 'boolean' } }, required: ['open'] } },
   { name: 'repeat_instruction', description: '用户没听清导航提示时，取当前的导航提示原文。', input_schema: { type: 'object', additionalProperties: false, properties: {}, required: [] } }
 ];
 

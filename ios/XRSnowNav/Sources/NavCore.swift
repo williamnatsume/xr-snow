@@ -85,7 +85,11 @@ struct MapEdge: Decodable, Identifiable {
 }
 struct MapPOI: Decodable { let name: String; let kind: String; let c: [Double] }
 struct MapData: Decodable { let geo: Bool; let edges: [MapEdge]; let forks: [[Double]]; let pois: [MapPOI] }
-struct MapStateDTO: Decodable { let route: [String]; let pos: [Double]?; let acc: Double?; let next: [Double]?; let dest: [Double]? }
+struct MapStateDTO: Decodable {
+    let route: [String]; let pos: [Double]?; let acc: Double?; let next: [Double]?; let dest: [Double]?
+    // preview：雪人刚规划、还没出发的路线；near / forkDist：所在雪道和到下一个岔口的距离；far：不在雪场地图范围内
+    let preview: Bool?; let near: String?; let forkDist: Double?; let far: Bool?; let km: Double?; let min: Int?
+}
 
 struct SimStepResult: Decodable {
     let done: Bool

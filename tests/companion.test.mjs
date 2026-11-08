@@ -232,3 +232,48 @@ test('去山脚，可以走高级道：泛称地点 + 难度条件一起认出�
   assert.equal(r.destination, '山脚');
   assert.equal(r.maxDifficulty, 3);
 });
+
+test('地图联动：说“看地图”打开、“关掉地图”收起；规划后地图上有预览路线，出发后变成导航路线', () => {
+  assert.equal(rulesIntent('雪人，打开地图', R).intent, 'map');
+  assert.equal(rulesIntent('给我看看地图', R).intent, 'map');
+  assert.equal(rulesIntent('关掉地图吧', R).intent, 'mapClose');
+  assert.equal(rulesIntent('地図を見せて', R).intent, 'map');
+  const ses = createSession(demoText);
+  ses.configure('sim', 'S', 3);
+  const say = (t) => JSON.parse(ses.converse(ses.understandLocal(t), 0));
+  assert.equal(say('看地图').event, 'map_open');
+  assert.equal(say('收起地图').event, 'map_close');
+  assert.equal(JSON.parse(ses.tool('show_map', '{"open":true}', 0)).event, 'map_open');
+  say('去山脚餐厅，不走高级道');
+  const pre = JSON.parse(ses.mapState(0));
+  assert.equal(pre.preview, true);
+  assert.ok(pre.route.length > 0 && pre.dest && pre.km > 0);
+  say('好');
+  const nav = JSON.parse(ses.mapState(0));
+  assert.equal(nav.preview, false);
+  assert.ok(nav.route.length > 0 && nav.next);
+  say('结束导航');
+  const after = JSON.parse(ses.mapState(0));
+  assert.equal(after.route.length, 0, '结束后不再显示旧路线');
+});
+
+test('地图联动：真实雪场没在导航时，GPS 点在雪道上 → 显示所在雪道和往下的下一个岔口；“我在哪”也说岔口距离', () => {
+  const text = fs.readFileSync(path.join(ROOT, 'resorts/kagura-osm.json'), 'utf8');
+  const s = createSession(text);
+  s.configure('gps', null);
+  const md = JSON.parse(s.mapData());
+  let hit = null;
+  for (const e of md.edges.filter((x) => x.t === 'run' && x.c.length >= 3)) {
+    const [lat, lon] = e.c[Math.floor(e.c.length / 2)];
+    s.onLocation(Date.now(), lat, lon, 5, 0);
+    const st = JSON.parse(s.mapState(Date.now()));
+    if (st.near && st.forkDist != null && st.next) { hit = st; break; }
+  }
+  assert.ok(hit, '至少有一条雪道中间能找到往下的岔口');
+  assert.ok(hit.pos && hit.forkDist >= 0);
+  const w = JSON.parse(s.converse(s.understandLocal('我在哪'), Date.now()));
+  assert.match(w.say, /岔口/);
+  s.onLocation(Date.now(), 35.68, 139.76, 5, 0);   // 东京
+  assert.equal(JSON.parse(s.mapState(Date.now())).far, true);
+  assert.match(JSON.parse(s.converse(s.understandLocal('我在哪'), Date.now())).say, /不在这个雪场/);
+});
