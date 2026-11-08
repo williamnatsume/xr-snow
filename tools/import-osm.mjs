@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { convertOsm, elevationPoints, eleKey } from '../nav/osm-import.js';
+import { applyEvidence } from '../nav/trace-evidence.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IN = process.argv[2] || path.join(ROOT, 'data/osm/kagura-overpass.json');
@@ -53,6 +54,12 @@ for (const [lat, lon] of missing) cache[eleKey(lat, lon)] = await fetchElevation
 fs.writeFileSync(CACHE, JSON.stringify(cache));
 
 const out = convertOsm(raw, OPTS, (lat, lon) => cache[eleKey(lat, lon)] ?? null);
+// 有轨迹证据（tools/analyze-traces.mjs 生成）时写进地图：被轨迹佐证的推算连接不再算“不确定”
+const EVIDENCE = path.join(ROOT, 'data/osm', `${OPTS.id.replace(/-osm$/, '')}-trace-evidence.json`);
+if (fs.existsSync(EVIDENCE)) {
+  applyEvidence(out, JSON.parse(fs.readFileSync(EVIDENCE, 'utf8')));
+  console.log('轨迹证据：', JSON.stringify(out.importReport.traceEvidence));
+}
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(out, null, 1));
 const r = out.importReport;

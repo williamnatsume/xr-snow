@@ -72,3 +72,22 @@ test('自动修补：神乐山脚 → 山顶能连通，走的是现实中的缆
   const unreachable = stations.filter((b) => !stations.some((a) => a !== b && planRoute(R, { startNode: a.node, goalNode: b.node }, { maxDifficulty: 4, allowUnknownDifficulty: true }).ok));
   assert.deepEqual(unreachable.map((x) => x.name), ['田代ロープウェー 乘车处']);
 });
+
+test('轨迹证据：神乐的推算连接里，被公开轨迹佐证的不再标“不确定”', async () => {
+  const { traceEvidence, applyEvidence, parseTrackpointsGpx } = await import('../nav/trace-evidence.js');
+  const out = convertOsm(raw, OPTS, (lat, lon) => cache[eleKey(lat, lon)] ?? null);
+  const R = loadResort(out);
+  // 人造一条沿着某个推算连接走的轨迹
+  const c = out.edges.find((e) => e.type === 'connector' && e.uncertain);
+  const [a, b] = [c.geometry[0], c.geometry[c.geometry.length - 1]];
+  const pts = Array.from({ length: 12 }, (_, i) => [a[0] + (b[0] - a[0]) * i / 11, a[1] + (b[1] - a[1]) * i / 11, 1e12 + i * 1000]);
+  const gpx = '<trkseg>' + pts.map(([la, lo, t]) => `<trkpt lat="${la}" lon="${lo}">\n<time>${new Date(t).toISOString()}</time></trkpt>`).join('') + '</trkseg>';
+  const segs = parseTrackpointsGpx(gpx);
+  assert.equal(segs[0].length, 12);
+  const ev = traceEvidence(R, segs);
+  applyEvidence(out, ev);
+  const after = out.edges.find((e) => e.id === c.id);
+  assert.equal(after.uncertain, false);
+  assert.equal(after.attr.evidence, 'gps-traces');
+  assert.ok(out.importReport.traceEvidence.confirmedInferred >= 1);
+});

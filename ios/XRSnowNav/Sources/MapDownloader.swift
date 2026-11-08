@@ -28,9 +28,11 @@ struct MapQuality: Decodable {
     let unlinkedLiftEnds: Int
     let directionConflicts: Int
     let elevationKnown: Double
+    let traceConfirmed: Int?
     var summary: String {
         let named = runs > 0 ? Int(Double(namedRuns) / Double(runs) * 100) : 0
-        return "雪道 \(runs) 段（有名字 \(named)%），缆车 \(lifts) 条；推算连接 \(derivedConnections) 处，未连上的缆车站 \(unlinkedLiftEnds) 个"
+        let confirmed = traceConfirmed.map { "（其中 \($0) 处有公开轨迹佐证）" } ?? ""
+        return "雪道 \(runs) 段（有名字 \(named)%），缆车 \(lifts) 条；推算连接 \(derivedConnections) 处\(confirmed)，未连上的缆车站 \(unlinkedLiftEnds) 个"
     }
 }
 
@@ -135,14 +137,43 @@ final class MapDownloader {
         let elevJSON = String(data: try JSONSerialization.data(withJSONObject: elev), encoding: .utf8)!
         guard let resJSON = core.osm("convert", [raw, optsJSON, elevJSON]), let rd = resJSON.data(using: .utf8),
               let res = try JSONSerialization.jsonObject(with: rd) as? [String: Any] else { throw MapError.convert("转换出错") }
-        guard res["ok"] as? Bool == true, let resort = res["resort"] as? String else {
+        guard res["ok"] as? Bool == true, var resort = res["resort"] as? String else {
             throw MapError.convert((res["errors"] as? [String])?.joined(separator: "；") ?? "这一带没有可用的雪道数据")
         }
+        // 用 OpenStreetMap 上公开的 GPS 轨迹核对：有人走过的推算连接不再算“不确定”（失败不影响使用）
+        if let checked = await verifyWithTraces(resort: resort, box: box) { resort = checked }
         try resort.write(to: ResortStore.downloadedURL(id), atomically: true, encoding: .utf8)
         var quality: MapQuality?
         if let q = res["quality"], let qd = try? JSONSerialization.data(withJSONObject: q) { quality = try? JSONDecoder().decode(MapQuality.self, from: qd) }
         XLog("[地图] 已保存 %@：%@", id, quality?.summary ?? "")
         return (id, quality)
+    }
+
+    private func verifyWithTraces(resort: String, box: [String: Double]) async -> String? {
+        guard let bj = try? JSONSerialization.data(withJSONObject: box), let tilesJSON = core.osm("traceTiles", [String(data: bj, encoding: .utf8)!]),
+              let tiles = try? JSONSerialization.jsonObject(with: Data(tilesJSON.utf8)) as? [String] else { return nil }
+        onProgress?("正在用公开轨迹核对地图…")
+        var gpx: [String] = []
+        var requests = 0
+        for tile in tiles {
+            for page in 0..<5 {
+                guard requests < 40 else { break }   // 对 OSM 服务器客气一点
+                requests += 1
+                guard let url = URL(string: "https://api.openstreetmap.org/api/0.6/trackpoints?bbox=\(tile)&page=\(page)"),
+                      let (d, resp) = try? await http.data(from: url), (resp as? HTTPURLResponse)?.statusCode == 200,
+                      let text = String(data: d, encoding: .utf8) else { break }
+                gpx.append(text)
+                let n = text.components(separatedBy: "<trkpt").count - 1
+                try? await Task.sleep(for: .milliseconds(300))
+                if n < 5000 { break }
+            }
+        }
+        guard let listData = try? JSONSerialization.data(withJSONObject: gpx), let out = core.osm("applyTraces", [resort, String(data: listData, encoding: .utf8)!]),
+              let obj = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any] else { return nil }
+        let summary = obj["summary"] as? [String: Any] ?? [:]
+        XLog("[地图] 公开轨迹核对：%@", String(describing: summary))
+        guard obj["ok"] as? Bool == true else { return nil }
+        return obj["resort"] as? String
     }
 
     private func overpass(_ query: String) async throws -> String {

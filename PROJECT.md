@@ -234,6 +234,14 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - 没名字的雪道按难度称呼（“中级道 / 中級コース”），不再说“无名雪道”。
 - 测试参数 `-simspeed 10`。真机 5× / 10× 模拟测试通过。
 
+#### 用公开 GPS 轨迹核对地图（2026-11-08）
+- 数据合规原则（用户确认）：只用自己用户自愿上传的轨迹、OSM 公开轨迹、国土地理院航空照片（注明出处）；**不抓取滑呗 / Yukiyama 等用户发的轨迹图和视频**（版权、平台条款、个人信息）。
+- `tools/fetch-osm-traces.mjs`：按 0.02° 小格下载 OSM trackpoints（每页 5000 点、请求间隔 300 ms），原始轨迹只存本机 `data/traces/`（已加入 .gitignore，不提交）。
+- `nav/trace-evidence.js`（纯函数，Mac / iPhone 共用）：每条边沿线每 20 m 取样，25 m 内有轨迹点算覆盖；推算连接覆盖 ≥ 50% 视为有轨迹佐证（`applyEvidence` 把 `uncertain` 改为 false，attr.evidence = gps-traces，质量报告加 traceConfirmed）；按 3–30 m/s 找“离地图 45 m 以上的连续快速移动”，`tools/analyze-traces.mjs` 再用国土地理院高程区分滑雪（下降 ≥ 20 m 且坡度 ≥ 5%）和公路。
+- 结果：神乐公开轨迹 2738 点 / 25 段，雪道覆盖 3.4 / 36.5 km，推算连接 9 / 25 有佐证（写入地图后 6 处去掉“不确定”）；苗场 6855 点，雪道 43 / 63 段有人滑过，推算连接 55 / 61 有佐证。两地“地图外快速移动”全部是公路（坡度 < 5%），**有轨迹的地方 OSM 没有漏画雪道**。
+- `data/osm/kagura-trace-evidence.json`（只有统计，可提交）；`tools/import-osm.mjs` 存在证据文件时自动写入。iPhone 下载地图后也会按小格拉 OSM 公开轨迹核对（最多 40 次请求），失败不影响使用；iPhone 端未实测（当时锁屏）。
+- 结论：公开轨迹在热门雪场（苗场）有用，在神乐太稀疏。下一步价值最高的是用户自己的轨迹（自愿上传，按同一套 traceEvidence 分析）；航空照片深度学习是更长期的研究项目。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。

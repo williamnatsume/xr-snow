@@ -12,6 +12,7 @@ import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
 import { overpassQuery, skiAreaQuery, parseSkiAreas, padBbox, elevationPoints, convertOsm, eleKey } from './osm-import.js';
+import { traceEvidence, applyEvidence, parseTrackpointsGpx, traceTiles } from './trace-evidence.js';
 import { createCompanion, rulesIntent, brainSystemPrompt, companionSystemPrompt, COMPANION_TOOLS, INTENT_SCHEMA, stripWake, hasWake, afterWake, WAKE_WORDS } from './companion.js';
 
 export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH, createCompanion, rulesIntent, INTENT_SCHEMA, WAKE_WORDS };
