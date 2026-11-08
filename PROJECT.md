@@ -246,6 +246,14 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - 私有 Artifact「雪人地图核对」：https://claude.ai/artifact/LzvGDQ4kYZJ3bTEbJMf2V4 。国土地理院シームレス空中写真 zoom 17（约 1.2 m/像素）拼成 1024 px 大图随页面发布（Artifact 不能直接加载外部图片）：神乐 56 张、苗场 12 张，约 20 MB。叠加 OSM 雪道（按难度着色）、缆车、推算连接（橙色 = 没人验证，青色 = 有公开轨迹佐证）、岔口（黄圈）。
 - 标记存共享存储 `marks`；`tools/apply-review.mjs` 导出 → `data/osm/<雪场>-review.json` → `tools/import-osm.mjs` 用 `nav/review.js` 应用（对的 → 去掉不确定；走不通 → open=false 规划避开；画歪 / 名字 / 缺的路 → 待办）。说明见 `tools/review/README.md`。
 - 深度学习识别雪道（用 OSM 雪道当弱标注训练分割模型）是之后的研究项目，先看人工核对发现多少问题再决定。
+- 用户反馈（2026-11-08）：人工逐条标注不现实 → 核对页降级为备用工具，改在 App 里放地图。
+
+#### App 内地图（2026-11-08）
+- 主界面左上角地图按钮（导航卡片上也有“地图”）→ 全屏地图。`nav/core-entry.js` 新增 `mapData()`（全部边：类型、难度、名字、是否推算 / 关闭、坐标；岔口；POI）和 `mapState(nowMs)`（剩余路线的边、当前位置 / 精度、下一个岔口、目的地）。
+- 真实雪场（有经纬度）：`MapScreen.swift` 用 Apple 地图卫星混合底图 + MapPolyline。雪道按难度着色（绿 / 红 / 黑），缆车白色虚线，推算连接橙色点线，黄圈 = 岔口，青色粗线 = 当前路线，蓝点 = 我，闪烁圈 = 下一个岔口，旗子 = 目的地，餐厅标记。导航中打开会自动跟随位置；左上角按钮切换跟随。底部卡片显示当前播报和距岔口距离。
+- 虚构演示雪场（局部米制坐标）：Canvas 画示意图。
+- 测试参数：`-resort kagura-osm`、`-map`（启动后直接打开地图）。模拟器上神乐 + 虚构雪场截图确认正常；已装到 iPhone，iPhone 上未看。
+- 顺带修：① 启动时主线程（选 TTS 声音）和后台（能力自检列声音）同时调用 `AVSpeechSynthesisVoice.speechVoices()` 会在 TextToSpeech 里死锁、整个界面卡死（模拟器必现，真机可能偶发）→ 自检改为在主线程取列表；② 离线规则“去山脚，可以走高级道”认不出泛称目的地 → 修好并加测试（55 个测试通过）。
 
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 

@@ -225,3 +225,10 @@ test('云端提示：包含地点表，说明不由模型决定路线', () => {
   assert.ok(p.includes('山脚餐厅'));
   assert.ok(p.includes('不规划路线'));
 });
+
+test('去山脚，可以走高级道：泛称地点 + 难度条件一起认出来', () => {
+  const r = rulesIntent('去山脚，可以走高级道', R);
+  assert.equal(r.intent, 'navigate');
+  assert.equal(r.destination, '山脚');
+  assert.equal(r.maxDifficulty, 3);
+});

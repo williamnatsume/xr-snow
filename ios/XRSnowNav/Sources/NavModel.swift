@@ -32,6 +32,10 @@ final class NavModel {
     var mapStatus: String?
     var nearbyAreas: [SkiArea] = []
     var mapQuality: MapQuality?
+    // App 里的地图
+    var mapData: MapData?
+    var mapState: MapStateDTO?
+    var mapOpen = false
 
     // 设置（存在 UserDefaults）
     var resortId: String { didSet { if resortId != oldValue { save(); loadResort() } } }
@@ -154,6 +158,9 @@ final class NavModel {
         // 测试用：启动参数 -say "一句话" 可以重复多次，启动后按顺序当作用户说的话
         let args = ProcessInfo.processInfo.arguments
         let scripted = args.indices.filter { args[$0] == "-say" && $0 + 1 < args.count }.map { args[$0 + 1] }
+        // 测试用：-resort kagura 切换雪场，-map 启动后直接打开地图
+        if let i = args.firstIndex(of: "-resort"), i + 1 < args.count { resortId = args[i + 1] }
+        if args.contains("-map") { Task { try? await Task.sleep(for: .seconds(scripted.isEmpty ? 0.5 : 5)); self.openMap() } }
         // 测试用：-simspeed 20
         if let i = args.firstIndex(of: "-simspeed"), i + 1 < args.count, let v = Double(args[i + 1]) { simSpeed = v }
         // 测试用：-dlmap "纬度,经度" 找那里的雪场并下载第一个
@@ -203,6 +210,7 @@ final class NavModel {
             session = s
             info = s.info()
             mapQuality = ResortStore.quality(resortId)
+            mapData = s.mapData()
             if info?.allowRealGps != true { mode = .sim }
             if !places.contains(where: { $0.node == simStartNode }) { simStartNode = places.first?.node ?? "" }
             // 神乐的雪道名是日文，中文语音读不出假名
@@ -842,6 +850,8 @@ final class NavModel {
         speakOut(text, lang: lang)
     }
 
+    func openMap() { mapState = session?.mapState(nowMs: nowMs); mapOpen = true }
+
     func simWrongBranch() { session?.simWrongBranch() }
     func simOutage() { session?.simOutage(seconds: 12) }
 
@@ -967,6 +977,7 @@ final class NavModel {
 
     private func refresh() {
         snapshot = session?.snapshot(nowMs: nowMs)
+        if mapOpen { mapState = session?.mapState(nowMs: nowMs) }
         let st = snapshot?.state ?? "idle"
         if let v = snapshot?.speed, navigating { maxSpeed = max(maxSpeed, v) }
         if st != lastNavState {

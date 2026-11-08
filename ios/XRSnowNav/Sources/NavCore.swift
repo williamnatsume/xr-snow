@@ -73,6 +73,20 @@ struct ConverseResult: Decodable {
     let event: String?
 }
 
+// App 里的地图（nav/core-entry.js 的 mapData / mapState）
+struct MapEdge: Decodable, Identifiable {
+    let id: String
+    let t: String
+    let d: Int
+    let n: String
+    let u: Int
+    let closed: Int
+    let c: [[Double]]
+}
+struct MapPOI: Decodable { let name: String; let kind: String; let c: [Double] }
+struct MapData: Decodable { let geo: Bool; let edges: [MapEdge]; let forks: [[Double]]; let pois: [MapPOI] }
+struct MapStateDTO: Decodable { let route: [String]; let pos: [Double]?; let acc: Double?; let next: [Double]?; let dest: [Double]? }
+
 struct SimStepResult: Decodable {
     let done: Bool
     let simDone: Bool?
@@ -286,6 +300,9 @@ final class NavSession {
               let sys = obj["system"] as? String, let schema = obj["schema"] else { return nil }
         return (sys, schema)
     }
+
+    func mapData() -> MapData? { decode(MapData.self, call("mapData")) }
+    func mapState(nowMs: Double) -> MapStateDTO? { decode(MapStateDTO.self, call("mapState", [nowMs])) }
 
     func drainSpeech() -> [SpeechItem] { decode([SpeechItem].self, call("drainSpeech")) ?? [] }
     func replayText(nowMs: Double) -> String? { decode(String?.self, call("replayText", [nowMs])) ?? nil }

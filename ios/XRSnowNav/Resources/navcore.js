@@ -2185,10 +2185,15 @@ out tags bb;`;
     }
     if (hasPlace || req.maxDifficulty != null || req.avoidFlat || req.preferShort) {
       const amb = req.ambiguous.length && !req.destination ? (req.ambiguous[0].match(/“(.+?)”/) || [])[1] || "" : "";
+      let dest = req.destination?.name || amb;
+      if (!dest) {
+        const dm = DEST_RE.exec(t);
+        if (dm && resolvePlace(resort, dm[1].trim())) dest = dm[1].trim();
+      }
       return {
         ...EMPTY,
         intent: "navigate",
-        destination: req.destination?.name || amb,
+        destination: dest,
         start: req.start?.name || "",
         maxDifficulty: req.maxDifficulty ?? 0,
         avoidFlat: req.avoidFlat ? "yes" : "",
@@ -3007,6 +3012,41 @@ out tags bb;`;
         if (!s.nextText) return J(lastSpoken?.text || null);
         if (s.distToNext > 60 && lang !== "ja") return J(`\u7EA6${Math.round(s.distToNext / 10) * 10}\u7C73\u540E\uFF0C${s.nextText}`);
         return J(s.nextText);
+      },
+      // App 里的地图：静态部分（雪道 / 缆车 / 连接 / 岔口 / 地点），载入雪场后取一次。
+      // geo = true 时坐标是 [纬度, 经度]（可以叠在卫星图上）；虚构雪场是局部米制坐标 [x, y]（画示意图）。
+      mapData() {
+        const geo = !!resort.proj;
+        const r5 = (v) => Math.round(v * 1e5) / 1e5;
+        const coord = (p) => geo ? (({ lat, lon }) => [r5(lat), r5(lon)])(resort.proj.toLatLon(p.x, p.y)) : [Math.round(p.x), Math.round(p.y)];
+        const edges = [...resort.edges.values()].map((e) => ({
+          id: e.id,
+          t: e.type,
+          d: e.difficulty ?? 0,
+          n: e.name || e.ref || "",
+          u: e.uncertain ? 1 : 0,
+          closed: e.open === false ? 1 : 0,
+          c: e.pts.map(coord)
+        }));
+        const forks = [];
+        for (const [id, outs] of resort.out) {
+          if (outs.filter((e) => e.type !== "lift").length >= 2) forks.push(coord(resort.nodes.get(id)));
+        }
+        const pois = (resort.pois || []).filter((p) => !p.isolated).map((p) => ({ name: p.name, kind: p.kind, c: coord(resort.nodes.get(p.node)) }));
+        return J({ geo, edges, forks, pois });
+      },
+      // 地图上会动的部分：剩下的路线、当前位置、下一个岔口
+      mapState(nowMs) {
+        const geo = !!resort.proj;
+        const coord = (p) => geo ? (({ lat, lon }) => [lat, lon])(resort.proj.toLatLon(p.x, p.y)) : [p.x, p.y];
+        const fix = nav?.lastFix || (!sim ? lastFix : null);
+        let next = null;
+        if (nav && nav.state !== "idle" && nav.state !== "arrived") {
+          const m = nav.snapshot(sim ? sim.t : nowMs).next;
+          if (m?.nodeId && resort.nodes.get(m.nodeId)) next = coord(resort.nodes.get(m.nodeId));
+        }
+        const route = nav?.route ? nav.route.slice(nav.idx).map((e) => e.id) : plan && !nav ? plan.edges.map((e) => e.id) : [];
+        return J({ route, pos: fix ? coord(fix) : null, acc: fix?.acc ?? null, next, dest: plan?.destNode && resort.nodes.get(plan.destNode) ? coord(resort.nodes.get(plan.destNode)) : null });
       },
       snapshot(nowMs) {
         if (!nav) return J({ state: "idle", stateZh: STATE_ZH.idle });

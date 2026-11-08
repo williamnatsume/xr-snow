@@ -97,10 +97,13 @@ export function rulesIntent(text, resort) {
   }
   if (hasPlace || req.maxDifficulty != null || req.avoidFlat || req.preferShort) {
     const amb = req.ambiguous.length && !req.destination ? (req.ambiguous[0].match(/“(.+?)”/) || [])[1] || '' : '';
+    // “去山脚，可以走高级道”：难度条件认出来了，但“山脚/山顶/餐厅”这类泛称要靠 resolvePlace
+    let dest = req.destination?.name || amb;
+    if (!dest) { const dm = DEST_RE.exec(t); if (dm && resolvePlace(resort, dm[1].trim())) dest = dm[1].trim(); }
     return {
       ...EMPTY,
       intent: 'navigate',
-      destination: req.destination?.name || amb,
+      destination: dest,
       start: req.start?.name || '',
       maxDifficulty: req.maxDifficulty ?? 0,
       avoidFlat: req.avoidFlat ? 'yes' : '',

@@ -23,10 +23,15 @@ struct ContentView: View {
                 .navigationTitle("雪人")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { model.openMap() } label: { Image(systemName: "map") }
+                            .accessibilityLabel("看地图")
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showSettings = true } label: { Image(systemName: "gearshape") }
                     }
                 }
+                .fullScreenCover(isPresented: Binding(get: { model.mapOpen }, set: { model.mapOpen = $0 })) { MapScreen(model: model) }
                 .sheet(isPresented: $showSettings) { SettingsView(model: model) }
             }
         }
@@ -85,6 +90,7 @@ struct NavCard: View {
             HStack {
                 Button(model.paused ? "继续" : "暂停") { model.togglePause() }
                 Button("重播") { model.replay() }
+                Button("地图") { model.openMap() }
                 if model.mode == .sim {
                     Button("走错") { model.simWrongBranch() }
                     Button("断 12 秒") { model.simOutage() }

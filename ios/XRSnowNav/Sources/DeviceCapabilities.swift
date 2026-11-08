@@ -45,7 +45,8 @@ enum DeviceCapabilities {
         }
         // 已安装的中文 / 日语声音（质量：1 默认 2 增强 3 高级）
         for lang in ["zh-CN", "ja-JP"] {
-            let vs = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == lang }
+            // 只在主线程取声音列表：和主线程同时调用会在 TextToSpeech 里互相等死（模拟器上必现）
+            let vs = await MainActor.run { AVSpeechSynthesisVoice.speechVoices() }.filter { $0.language == lang }
                 .map { "\($0.name)(\($0.quality.rawValue))" }
             lines.append("声音 \(lang)：\(vs.joined(separator: "、"))")
         }
