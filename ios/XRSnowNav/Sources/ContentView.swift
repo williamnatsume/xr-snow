@@ -218,9 +218,10 @@ struct SettingsView: View {
             Form {
                 Section("雪场") {
                     Picker("雪场", selection: $model.resortId) {
-                        ForEach(model.resortIds, id: \.self) { id in
-                            Text(id == "demo-fictional" ? "虚构演示雪场" : "神乐（OSM，未核实）").tag(id)
-                        }
+                        ForEach(model.resortChoices, id: \.0) { r in Text(r.1).tag(r.0) }
+                    }
+                    if let q = model.mapQuality {
+                        Text("地图质量：\(q.summary)").font(.footnote).foregroundStyle(.secondary)
                     }
                     if let info = model.info, !info.disclaimer.isEmpty {
                         Text(info.disclaimer).font(.footnote).foregroundStyle(.secondary)
@@ -240,6 +241,28 @@ struct SettingsView: View {
                     } else if model.needsAck {
                         Toggle("我知道地图数据未核实，开放状态未知，只作参考", isOn: $model.dataAck)
                     }
+                }
+
+                Section {
+                    Toggle("到雪场时自动下载地图", isOn: $model.autoMapDownload)
+                    Button(model.mapBusy ? "处理中…" : "找我附近的雪场") { Task { await model.findNearby() } }
+                        .disabled(model.mapBusy)
+                    ForEach(model.nearbyAreas) { a in
+                        Button("下载：\(a.name)（\(a.inside ? "就在这里" : "\(Int(a.dist_m / 1000)) 公里外")）") {
+                            Task { await model.downloadArea(a) }
+                        }.disabled(model.mapBusy)
+                    }
+                    DisclosureGroup("测试：按名字找日本的雪场") {
+                        ForEach(MapPresets.japan, id: \.0) { p in
+                            Button(p.0) { Task { await model.findNearby(lat: p.1, lon: p.2) } }.disabled(model.mapBusy)
+                        }
+                    }
+                    if model.resortId.hasPrefix("osm-") {
+                        Button("删除当前下载的地图", role: .destructive) { model.deleteDownloaded(model.resortId) }
+                    }
+                    if let s = model.mapStatus { Text(s).font(.footnote).foregroundStyle(.secondary) }
+                } header: { Text("雪场地图（OpenStreetMap）") } footer: {
+                    Text("地图来自 OpenStreetMap 社区（© OpenStreetMap contributors，ODbL），海拔来自国土地理院（日本）或 Open-Meteo。数据未经核实，开放状态未知，请以现场路牌为准。下载后离线可用。")
                 }
 
                 Section {
@@ -331,4 +354,18 @@ struct SettingsView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
     }
+}
+
+// 在家测试下载用：日本几个大雪场的大概位置
+enum MapPresets {
+    static let japan: [(String, Double, Double)] = [
+        ("かぐら（神乐）", 36.866, 138.757),
+        ("苗場", 36.791, 138.780),
+        ("GALA湯沢", 36.951, 138.800),
+        ("野沢温泉", 36.922, 138.625),
+        ("志賀高原", 36.770, 138.510),
+        ("白馬八方尾根", 36.700, 137.830),
+        ("ニセコ グラン・ヒラフ", 42.862, 140.700),
+        ("ルスツ", 42.750, 140.880)
+    ]
 }

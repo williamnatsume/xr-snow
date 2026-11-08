@@ -206,6 +206,15 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - **持久日志**：`FileLog.swift`（`XLog` 替代 NSLog），写 App Documents/logs/xueren-YYYYMMDD.log，保留 7 天；对话逐句记 `[对话]`。取回：`xcrun devicectl device copy from --device <UDID> --domain-type appDataContainer --domain-identifier io.github.williamnatsume.XRSnowNav --source Documents/logs --destination <目录>`（不需要 root，真机验证可用）。
 - 真机：实时语音“带我去山顶” → plan_route(山顶) → 对应到第5ロマンス下车处；中级上限下无路线，雪人问是否允许高级道。
 
+#### 自动下载雪场地图（2026-11-08）
+- 产品定位（用户明确）：核心是“滑到岔口时告诉我往左还是往右”，加上让一个人滑雪的人觉得有伴、开心。地图准确性是关键。
+- **不从滑呗 / Yukiyama / Slopes 抓取**（使用条款、版权）。数据源：OpenStreetMap（ODbL）+ 高程（日本：国土地理院；其他：Open-Meteo Copernicus DEM）。
+- `nav/osm-import.js`：转换逻辑从 tools/import-osm.mjs 抽出来的纯函数（Mac 工具和 iPhone 共用）；`elevationPoints` → 原生查高程 → `convertOsm`；`skiAreaQuery` / `parseSkiAreas`（landuse=winter_sports，同名合并、按“在里面 / 距离”排序）；输出 `importReport.quality`（雪道数、有名字的比例、推算连接、未连上的缆车站等）。重新生成的神乐地图与原来逐字一致（除 provenance）。`tests/osm-import.test.mjs` 4 项，共 51 项通过。
+- iOS `MapDownloader.swift`：Overpass（两个服务器轮换）→ 高程（GSI 并发 6；Open-Meteo 每次 100 点）→ JS 转换 → `Documents/resorts/osm-<type>-<id>.json`（离线可用，`NavCore.resortText` 优先读这里）。`ResortStore` 列出内置 + 下载的雪场；`covering(lat,lon)` 按 bbox 判断已下载的雪场。
+- 自动：真实定位时每 30 分钟 / 移动 3 km 检查一次；在已下载雪场范围内就自动切换，否则查 3 km 内的雪场并下载，雪人说“到XX啦！地图我下好了”。设置里：自动下载开关、“找我附近的雪场”、测试用日本雪场预设、删除下载的地图、当前地图质量。启动参数 `-dlmap "纬度,经度"`。
+- Mac 实网测试（苗场）：找到“苗場スキー場（在里面）”，雪道 60 段（92% 有名字）、缆车 14 条；Overpass 公共服务器慢（找雪场 36 s、下载 50 s）。**iPhone 上还没实测**（当时手机锁屏）。
+- 数据现状评估：神乐 OSM 雪道 108 段、40% 没名字、15 处推算连接、4 个缆车站端点没连上；几何精度未知。够做原型和实地验证，不够“闭眼信”。下一步：用用户在雪场录的 GPX 核对岔口位置 / 拓扑，无名雪道改用“方向 + 难度 + 通往哪个缆车”来称呼。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。

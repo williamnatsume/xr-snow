@@ -11,11 +11,30 @@ import { Navigator, STATE_ZH, UNRELIABLE_ZH } from './navigator.js';
 import { Simulator } from './simulator.js';
 import { parseRequest } from './nlp.js';
 import { runScenario } from './scenario.js';
+import { overpassQuery, skiAreaQuery, parseSkiAreas, padBbox, elevationPoints, convertOsm, eleKey } from './osm-import.js';
 import { createCompanion, rulesIntent, brainSystemPrompt, companionSystemPrompt, COMPANION_TOOLS, INTENT_SCHEMA, stripWake, hasWake, afterWake, WAKE_WORDS } from './companion.js';
 
 export { loadResort, planRoute, Navigator, buildManeuvers, maneuverText, parseRequest, Simulator, runScenario, DEFAULT_PREFS, STATE_ZH, UNRELIABLE_ZH, createCompanion, rulesIntent, INTENT_SCHEMA, WAKE_WORDS };
 
 const J = (x) => JSON.stringify(x);
+
+// 自动下载地图（OpenStreetMap）：原生层负责联网，转换在这里。参数和返回值都是字符串
+export const osm = {
+  skiAreaQuery: (lat, lon, radiusKm) => skiAreaQuery(lat, lon, radiusKm),
+  parseSkiAreas: (rawText, lat, lon) => J(parseSkiAreas(JSON.parse(rawText), lat, lon)),
+  downloadQuery: (bboxJson) => overpassQuery(padBbox(JSON.parse(bboxJson))),
+  elevationPoints: (rawText, optsJson) => J(elevationPoints(JSON.parse(rawText), JSON.parse(optsJson))),
+  // elevJson：{ "lat5,lon5": 海拔 }；返回 { ok, resort（JSON 文本）, quality, errors }
+  convert(rawText, optsJson, elevJson) {
+    // 高程：{ "lat5,lon5": 海拔 } 或 [[lat, lon, 海拔], …]（后者由原生层按 elevationPoints 的顺序填好，避免两边取整不一致）
+    const e = JSON.parse(elevJson || '{}');
+    const elev = Array.isArray(e) ? Object.fromEntries(e.map(([la, lo, v]) => [eleKey(la, lo), v])) : e;
+    const out = convertOsm(JSON.parse(rawText), JSON.parse(optsJson), (lat, lon) => elev[eleKey(lat, lon)] ?? null);
+    const check = loadResort(out);
+    const ok = !check.errors.length && out.edges.some((e) => e.type === 'run');
+    return J({ ok, errors: check.errors, quality: out.importReport.quality, resort: JSON.stringify(out) });
+  }
+};
 
 // M1 验收用：跑一遍完整模拟，返回播报文字序列（与 npm test 的同一场景对比）
 export function scenarioTexts(resortJsonText, opts) {

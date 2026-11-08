@@ -13,8 +13,14 @@
   "source": "OpenStreetMap contributors（Overpass API 导出）",
   "license": "ODbL 1.0 — © OpenStreetMap contributors",
   "elevation": "国土地理院 標高API（出典：国土地理院）",
-  "retrieved": "2026-11-03",
-  "importer": "tools/import-osm.mjs"
+  "retrieved": "2026-11-08",
+  "importer": "tools/import-osm.mjs",
+  "bbox": {
+   "minLat": 36.836,
+   "maxLat": 36.9,
+   "minLon": 138.7,
+   "maxLon": 138.8
+  }
  },
  "attributeLegend": {
   "demo": "演示属性（虚构）",
@@ -149,6 +155,16 @@
    }
   ],
   "directionConflicts": [],
+  "quality": {
+   "runs": 108,
+   "lifts": 18,
+   "namedRuns": 65,
+   "unknownDifficulty": 0,
+   "derivedConnections": 15,
+   "unlinkedLiftEnds": 4,
+   "directionConflicts": 0,
+   "elevationKnown": 1
+  },
   "params": {
    "SNAP_M": 25,
    "LIFT_LINK_M": 60,

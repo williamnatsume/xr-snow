@@ -133,11 +133,23 @@ final class NavCore {
     }
 
     static func resortText(_ id: String) throws -> String {
+        // 下载的地图（Documents/resorts）优先，其次是打包在 App 里的
+        let downloaded = ResortStore.downloadedURL(id)
+        if let text = try? String(contentsOf: downloaded, encoding: .utf8) { return text }
         guard let url = Bundle.main.url(forResource: id, withExtension: "json"),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
             throw NavCoreError.missingResource("\(id).json")
         }
         return text
+    }
+
+    // 地图下载（nav/core-entry.js 的 osm 对象）
+    func osm(_ name: String, _ args: [Any]) -> String? {
+        guard let o = xrnav.objectForKeyedSubscript("osm"), let r = o.invokeMethod(name, withArguments: args), r.isString else {
+            XLog("[地图] JS osm.%@ 出错：%@", name, lastError ?? "")
+            return nil
+        }
+        return r.toString()
     }
 
     func session(resortId: String) throws -> NavSession {

@@ -23,8 +23,15 @@ final class NavModel {
         var id: String { rawValue }
     }
 
-    // 打包进 App 的雪场（Resources 里的 json 文件名）
-    let resortIds = ["demo-fictional", "kagura-osm"]
+    // 可选的雪场：打包在 App 里的 + 下载的（id, 名字）
+    var resortChoices: [(String, String)] = ResortStore.all()
+    var resortIds: [String] { resortChoices.map(\.0) }
+    // 地图下载
+    var autoMapDownload: Bool { didSet { save() } }
+    var mapBusy = false
+    var mapStatus: String?
+    var nearbyAreas: [SkiArea] = []
+    var mapQuality: MapQuality?
 
     // 设置（存在 UserDefaults）
     var resortId: String { didSet { if resortId != oldValue { save(); loadResort() } } }
@@ -111,6 +118,7 @@ final class NavModel {
         cloudModel = CloudModel(rawValue: d.string(forKey: "cloudModel2") ?? "") ?? .haiku
         recordWhileNav = d.object(forKey: "recordWhileNav") as? Bool ?? true
         voiceId = d.string(forKey: "voiceId") ?? ""
+        autoMapDownload = d.object(forKey: "autoMapDownload") as? Bool ?? true
         realtimeOn = d.object(forKey: "realtimeOn") as? Bool ?? true
         rtModel = RealtimeModel(rawValue: d.string(forKey: "rtModel") ?? "") ?? .full
         rtVoice = d.string(forKey: "rtVoice") ?? "marin"
@@ -146,6 +154,17 @@ final class NavModel {
         // 测试用：启动参数 -say "一句话" 可以重复多次，启动后按顺序当作用户说的话
         let args = ProcessInfo.processInfo.arguments
         let scripted = args.indices.filter { args[$0] == "-say" && $0 + 1 < args.count }.map { args[$0 + 1] }
+        // 测试用：-dlmap "纬度,经度" 找那里的雪场并下载第一个
+        if let i = args.firstIndex(of: "-dlmap"), i + 1 < args.count {
+            let c = args[i + 1].split(separator: ",").compactMap { Double($0) }
+            if c.count == 2 {
+                Task {
+                    await self.findNearby(lat: c[0], lon: c[1])
+                    if let a = self.nearbyAreas.first { await self.downloadArea(a) }
+                    XLog("[地图] 测试结束：%@", self.mapStatus ?? "")
+                }
+            }
+        }
         // 测试用：-rtsay "一句话" 走实时语音（需要 OpenAI 密钥）
         if let i = args.firstIndex(of: "-rtsay"), i + 1 < args.count {
             let line = args[i + 1]
@@ -171,7 +190,7 @@ final class NavModel {
         d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang"); d.set(talkLang, forKey: "talkLang"); d.set(secondLang, forKey: "secondLang")
         d.set(voiceOn, forKey: "voiceOn"); d.set(wakeWordOn, forKey: "wakeWordOn"); d.set(mode.rawValue, forKey: "mode")
         d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav"); d.set(voiceId, forKey: "voiceId")
-        d.set(realtimeOn, forKey: "realtimeOn"); d.set(rtModel.rawValue, forKey: "rtModel"); d.set(rtVoice, forKey: "rtVoice")
+        d.set(autoMapDownload, forKey: "autoMapDownload"); d.set(realtimeOn, forKey: "realtimeOn"); d.set(rtModel.rawValue, forKey: "rtModel"); d.set(rtVoice, forKey: "rtVoice")
     }
 
     func loadResort() {
@@ -181,6 +200,7 @@ final class NavModel {
             let s = try core.session(resortId: resortId)
             session = s
             info = s.info()
+            mapQuality = ResortStore.quality(resortId)
             if info?.allowRealGps != true { mode = .sim }
             if !places.contains(where: { $0.node == simStartNode }) { simStartNode = places.first?.node ?? "" }
             // 神乐的雪道名是日文，中文语音读不出假名
@@ -310,6 +330,75 @@ final class NavModel {
                 let q = v.quality == .premium ? "高级" : v.quality == .enhanced ? "增强" : "普通"
                 return (v.identifier, "\(v.name)（\(q)）")
             }
+    }
+
+    // MARK: - 地图下载
+
+    private var mapDownloader: MapDownloader?
+    private var lastAreaCheck: (Date, CLLocation)?
+
+    private func downloader() -> MapDownloader? {
+        guard let core else { return nil }
+        if mapDownloader == nil {
+            let m = MapDownloader(core: core)
+            m.onProgress = { [weak self] s in self?.mapStatus = s }
+            mapDownloader = m
+        }
+        return mapDownloader
+    }
+
+    // 设置里的“找附近的雪场”：用当前位置（或给定坐标）找雪场
+    func findNearby(lat: Double? = nil, lon: Double? = nil) async {
+        guard let dl = downloader() else { return }
+        mapBusy = true; defer { mapBusy = false }
+        var la = lat, lo = lon
+        if la == nil {
+            mapStatus = "正在获取位置…"
+            guard let loc = await OneShotLocation().get() else { mapStatus = "拿不到当前位置（需要定位权限）"; return }
+            la = loc.coordinate.latitude; lo = loc.coordinate.longitude
+        }
+        mapStatus = "正在找附近的雪场…"
+        do {
+            nearbyAreas = try await dl.nearby(lat: la!, lon: lo!)
+            mapStatus = nearbyAreas.isEmpty ? "附近 8 公里内没有找到雪场" : "找到 \(nearbyAreas.count) 个雪场"
+        } catch { mapStatus = error.localizedDescription }
+    }
+
+    func downloadArea(_ area: SkiArea, announce: Bool = false) async {
+        guard let dl = downloader() else { return }
+        mapBusy = true; defer { mapBusy = false }
+        do {
+            let (id, q) = try await dl.download(area)
+            resortChoices = ResortStore.all()
+            mapStatus = "已下载 \(area.name)。\(q?.summary ?? "")"
+            resortId = id
+            if announce { reply("到\(area.name)啦！这里的雪道地图我下好了，想去哪儿喊我。", note: "地图") }
+        } catch { mapStatus = error.localizedDescription }
+    }
+
+    func deleteDownloaded(_ id: String) {
+        try? FileManager.default.removeItem(at: ResortStore.downloadedURL(id))
+        resortChoices = ResortStore.all()
+        if resortId == id { resortId = "demo-fictional" }
+    }
+
+    // 到了雪场自动下载：真实定位时，每 30 分钟或移动 3 公里以上检查一次
+    private func checkArrival(_ loc: CLLocation) {
+        guard autoMapDownload, !mapBusy, loc.horizontalAccuracy > 0, loc.horizontalAccuracy < 200 else { return }
+        if let (t, l) = lastAreaCheck, Date().timeIntervalSince(t) < 1800, loc.distance(from: l) < 3000 { return }
+        lastAreaCheck = (Date(), loc)
+        let lat = loc.coordinate.latitude, lon = loc.coordinate.longitude
+        // 已经下载过、包含这个位置的雪场：直接切过去
+        if let id = ResortStore.covering(lat: lat, lon: lon) {
+            if resortId != id { resortId = id }
+            return
+        }
+        Task {
+            guard let dl = downloader(), let areas = try? await dl.nearby(lat: lat, lon: lon, radiusKm: 3),
+                  let here = areas.first(where: { $0.inside }) ?? areas.first(where: { $0.dist_m < 1500 }) else { return }
+            XLog("[地图] 到了 %@，自动下载地图", here.name)
+            await downloadArea(here, announce: true)
+        }
     }
 
     // MARK: - 实时语音（OpenAI Realtime）
@@ -783,6 +872,7 @@ final class NavModel {
     }
 
     private func handle(_ loc: CLLocation) {
+        checkArrival(loc)
         if recorder.recording {
             if gapAnnounced, let gap = recorder.secondsSinceLastFix() {
                 gapAnnounced = false

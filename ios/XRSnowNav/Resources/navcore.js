@@ -33,6 +33,7 @@ var XRNav = (() => {
     createSession: () => createSession,
     loadResort: () => loadResort,
     maneuverText: () => maneuverText,
+    osm: () => osm,
     parseRequest: () => parseRequest,
     planRoute: () => planRoute,
     rulesIntent: () => rulesIntent,
@@ -1477,6 +1478,485 @@ var XRNav = (() => {
     return { plan, spoken, states, snaps, nav, simu, log: nav.log };
   }
 
+  // nav/osm-import.js
+  var OSM_CFG = {
+    SNAP_M: 25,
+    // 雪道端点离其他雪道这么近时，推算为相连
+    LIFT_LINK_M: 60,
+    // 缆车站离雪道节点这么近时，加一段步行连接
+    FLAT_GRADE: 0.06,
+    // 平均坡度低于 6% 视为平路（推算，待实测）
+    DIR_TOL_M: 3,
+    // 终点比起点高出超过 3 m，判定方向存疑
+    WALK_DEAD_M: 80,
+    WALK_DEAD_CLIMB: 10,
+    WALK_SRC_M: 120,
+    WALK_SRC_CLIMB: 15
+  };
+  var LIFT_TYPES = /* @__PURE__ */ new Set(["gondola", "chair_lift", "cable_car", "drag_lift", "t-bar", "platter", "magic_carpet", "mixed_lift", "rope_tow"]);
+  var DIFF = { novice: 1, easy: 1, intermediate: 2, advanced: 3, expert: 4, freeride: 4, extreme: 4 };
+  var LIFT_ZH = { gondola: "\u540A\u53A2", chair_lift: "\u540A\u6905", cable_car: "\u7F06\u8F66", drag_lift: "\u62D6\u7275", "t-bar": "\u62D6\u7275", platter: "\u62D6\u7275", magic_carpet: "\u9B54\u6BEF", mixed_lift: "\u6DF7\u5408\u7F06\u8F66", rope_tow: "\u62D6\u7EF3" };
+  function overpassQuery(b) {
+    const bb = `${b.minLat},${b.minLon},${b.maxLat},${b.maxLon}`;
+    return `[out:json][timeout:90];
+(
+  way["piste:type"="downhill"](${bb});
+  way["aerialway"](${bb});
+  node["aerialway"](${bb});
+  node["amenity"~"^(restaurant|cafe|fast_food)$"](${bb});
+  way["amenity"~"^(restaurant|cafe|fast_food)$"](${bb});
+  way["landuse"="winter_sports"](${bb});
+);
+(._;>;);
+out body;`;
+  }
+  function skiAreaQuery(lat, lon, radiusKm = 8) {
+    const r = radiusKm * 1e3;
+    return `[out:json][timeout:30];
+(
+  way["landuse"="winter_sports"](around:${r},${lat},${lon});
+  relation["landuse"="winter_sports"](around:${r},${lat},${lon});
+  relation["site"="piste"](around:${r},${lat},${lon});
+);
+out tags bb;`;
+  }
+  function parseSkiAreas(raw, lat, lon) {
+    const out = [];
+    for (const e of raw.elements || []) {
+      const t = e.tags || {};
+      const b = e.bounds;
+      if (!b) continue;
+      const name = t["name:zh"] || t.name || t["name:ja"] || t["name:en"] || null;
+      if (!name) continue;
+      const c = { lat: (b.minlat + b.maxlat) / 2, lon: (b.minlon + b.maxlon) / 2 };
+      out.push({
+        osm: `${e.type}/${e.id}`,
+        name,
+        name_ja: t["name:ja"] || t.name || null,
+        bbox: { minLat: b.minlat, minLon: b.minlon, maxLat: b.maxlat, maxLon: b.maxlon },
+        inside: lat >= b.minlat && lat <= b.maxlat && lon >= b.minlon && lon <= b.maxlon,
+        dist_m: Math.round(hav({ lat, lon }, c))
+      });
+    }
+    const merged = /* @__PURE__ */ new Map();
+    for (const a of out) {
+      const m = merged.get(a.name);
+      if (!m) {
+        merged.set(a.name, a);
+        continue;
+      }
+      m.bbox = {
+        minLat: Math.min(m.bbox.minLat, a.bbox.minLat),
+        minLon: Math.min(m.bbox.minLon, a.bbox.minLon),
+        maxLat: Math.max(m.bbox.maxLat, a.bbox.maxLat),
+        maxLon: Math.max(m.bbox.maxLon, a.bbox.maxLon)
+      };
+      m.inside = m.inside || a.inside;
+      m.dist_m = Math.min(m.dist_m, a.dist_m);
+    }
+    return [...merged.values()].sort((a, b) => b.inside - a.inside || a.dist_m - b.dist_m);
+  }
+  function padBbox(b, meters = 500) {
+    const dLat = meters / 111320, dLon = meters / (111320 * Math.cos((b.minLat + b.maxLat) / 2 * rad));
+    return { minLat: b.minLat - dLat, minLon: b.minLon - dLon, maxLat: b.maxLat + dLat, maxLon: b.maxLon + dLon };
+  }
+  var R2 = 6371e3;
+  var rad = Math.PI / 180;
+  function hav(a, b) {
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R2 * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  var lineLen = (pts) => pts.reduce((s, p, i) => i ? s + hav(pts[i - 1], p) : 0, 0);
+  function projectOnLine(p, pts) {
+    const kx = Math.cos(p.lat * rad) * R2 * rad, ky = R2 * rad;
+    let best = null;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = (pts[i].lon - p.lon) * kx, ay = (pts[i].lat - p.lat) * ky;
+      const bx = (pts[i + 1].lon - p.lon) * kx, by = (pts[i + 1].lat - p.lat) * ky;
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      const t = L2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+      const x = ax + dx * t, y = ay + dy * t, d = Math.hypot(x, y);
+      if (!best || d < best.d) best = { d, i, t };
+    }
+    return best;
+  }
+  var eleKey = (lat, lon) => lat.toFixed(5) + "," + lon.toFixed(5);
+  function elevationPoints(raw, opts) {
+    const need = /* @__PURE__ */ new Map();
+    convertOsm(raw, opts, (lat, lon) => {
+      need.set(eleKey(lat, lon), [lat, lon]);
+      return null;
+    });
+    return [...need.values()];
+  }
+  function convertOsm(rawIn, opts, elevation) {
+    const cfg = { ...OSM_CFG, ...opts.cfg || {} };
+    const raw = JSON.parse(JSON.stringify(rawIn));
+    const BBOX = opts.bbox;
+    const ele = (p) => {
+      const v = elevation(p.lat, p.lon);
+      return typeof v === "number" ? v : null;
+    };
+    const osmNodes = /* @__PURE__ */ new Map();
+    const osmWays = [];
+    for (const e of raw.elements) {
+      if (e.type === "node") osmNodes.set(e.id, { ...osmNodes.get(e.id) || {}, ...e });
+      else if (e.type === "way") osmWays.push(e);
+    }
+    const inBox = (n) => !BBOX || n.lat >= BBOX.minLat && n.lat <= BBOX.maxLat && n.lon >= BBOX.minLon && n.lon <= BBOX.maxLon;
+    const skipped = [];
+    const pistes = [], lifts = [];
+    for (const w of osmWays) {
+      const t = w.tags || {};
+      const isPiste = t["piste:type"] === "downhill";
+      const isLift = LIFT_TYPES.has(t.aerialway);
+      if (!isPiste && !isLift) continue;
+      const pts = w.nodes.map((id) => osmNodes.get(id));
+      if (pts.some((p) => !p)) {
+        skipped.push([w.id, t.name, "\u7F3A\u5C11\u8282\u70B9\u5750\u6807"]);
+        continue;
+      }
+      if (!pts.every(inBox)) {
+        skipped.push([w.id, t.name, opts.outOfBoxLabel || "\u8D85\u51FA\u96EA\u573A\u8303\u56F4"]);
+        continue;
+      }
+      if (w.nodes[0] === w.nodes[w.nodes.length - 1] || t.area === "yes") {
+        skipped.push([w.id, t.name, "\u9762\u72B6\u96EA\u9053\uFF0C\u65E0\u6CD5\u4F5C\u4E3A\u8DEF\u7EBF"]);
+        continue;
+      }
+      (isPiste ? pistes : lifts).push(w);
+    }
+    const useCount = /* @__PURE__ */ new Map();
+    for (const w of pistes) for (const id of new Set(w.nodes)) useCount.set(id, (useCount.get(id) || 0) + 1);
+    const vertexIds = /* @__PURE__ */ new Set();
+    for (const w of pistes) {
+      vertexIds.add(w.nodes[0]);
+      vertexIds.add(w.nodes[w.nodes.length - 1]);
+      for (const id of w.nodes) if (useCount.get(id) > 1) vertexIds.add(id);
+    }
+    for (const w of lifts) {
+      vertexIds.add(w.nodes[0]);
+      vertexIds.add(w.nodes[w.nodes.length - 1]);
+    }
+    const derivedJoins = [];
+    let synthId = -1;
+    for (const w of pistes) {
+      for (const endIdx of [0, w.nodes.length - 1]) {
+        const nid = w.nodes[endIdx];
+        if (useCount.get(nid) > 1) continue;
+        const p = osmNodes.get(nid);
+        let best = null;
+        for (const o2 of pistes) {
+          if (o2 === w) continue;
+          const pr2 = projectOnLine(p, o2.nodes.map((id) => osmNodes.get(id)));
+          if (pr2 && pr2.d <= cfg.SNAP_M && (!best || pr2.d < best.pr.d)) best = { o: o2, pr: pr2 };
+        }
+        if (!best) continue;
+        const { o, pr } = best;
+        const a = osmNodes.get(o.nodes[pr.i]), b = osmNodes.get(o.nodes[pr.i + 1]);
+        let joinId;
+        if (pr.t < 0.05) joinId = o.nodes[pr.i];
+        else if (pr.t > 0.95) joinId = o.nodes[pr.i + 1];
+        else {
+          joinId = synthId--;
+          osmNodes.set(joinId, { id: joinId, lat: a.lat + (b.lat - a.lat) * pr.t, lon: a.lon + (b.lon - a.lon) * pr.t });
+          o.nodes.splice(pr.i + 1, 0, joinId);
+        }
+        w.nodes[endIdx] = joinId;
+        useCount.set(joinId, (useCount.get(joinId) || 1) + 1);
+        vertexIds.add(joinId);
+        derivedJoins.push({ way: w.id, name: w.tags.name || null, gap_m: Math.round(pr.d), join: joinId });
+      }
+    }
+    const edges = [];
+    const usedVertex = /* @__PURE__ */ new Set();
+    function addEdge(e) {
+      edges.push(e);
+      usedVertex.add(e.fromOsm);
+      usedVertex.add(e.toOsm);
+    }
+    for (const w of pistes) {
+      const t = w.tags;
+      let start = 0, part = 0;
+      for (let i = 1; i < w.nodes.length; i++) {
+        if (!vertexIds.has(w.nodes[i]) && i !== w.nodes.length - 1) continue;
+        const ids = w.nodes.slice(start, i + 1);
+        part++;
+        addEdge({
+          osmWay: w.id,
+          part,
+          type: "run",
+          fromOsm: ids[0],
+          toOsm: ids[ids.length - 1],
+          pts: ids.map((id) => osmNodes.get(id)),
+          name: t.name || null,
+          ref: t["piste:ref"] || t.ref || null,
+          difficulty: DIFF[t["piste:difficulty"]] || null,
+          freeride: t["piste:difficulty"] === "freeride",
+          grooming: t["piste:grooming"] || null
+        });
+        start = i;
+      }
+    }
+    for (const w of lifts) {
+      const t = w.tags;
+      addEdge({
+        osmWay: w.id,
+        part: 1,
+        type: "lift",
+        liftType: t.aerialway,
+        fromOsm: w.nodes[0],
+        toOsm: w.nodes[w.nodes.length - 1],
+        pts: w.nodes.map((id) => osmNodes.get(id)),
+        name: t.name || null,
+        durationMin: t["aerialway:duration"] ? parseFloat(t["aerialway:duration"]) : null
+      });
+    }
+    const pisteVertex = [...usedVertex].filter((id) => edges.some((e) => e.type === "run" && (e.fromOsm === id || e.toOsm === id)));
+    const liftLinks = [];
+    for (const e of edges.filter((x) => x.type === "lift")) {
+      for (const [end, dir] of [[e.fromOsm, "toLift"], [e.toOsm, "fromLift"]]) {
+        if (pisteVertex.includes(end)) continue;
+        const p = osmNodes.get(end);
+        let best = null;
+        for (const v of pisteVertex) {
+          const d = hav(p, osmNodes.get(v));
+          if (d <= cfg.LIFT_LINK_M && (!best || d < best.d)) best = { v, d };
+        }
+        if (!best) {
+          liftLinks.push({ lift: e.name, end: dir, linked: false });
+          continue;
+        }
+        const a = dir === "toLift" ? best.v : end, b = dir === "toLift" ? end : best.v;
+        edges.push({
+          type: "connector",
+          fromOsm: a,
+          toOsm: b,
+          pts: [osmNodes.get(a), osmNodes.get(b)],
+          name: dir === "toLift" ? `${e.name || "\u7F06\u8F66"} \u4E58\u8F66\u5904\u6B65\u9053` : `${e.name || "\u7F06\u8F66"} \u4E0B\u8F66\u5904\u6B65\u9053`,
+          difficulty: 1,
+          flat: true,
+          linkOf: e.name
+        });
+        usedVertex.add(a);
+        usedVertex.add(b);
+        liftLinks.push({ lift: e.name, end: dir, linked: true, dist_m: Math.round(best.d) });
+      }
+    }
+    for (const e of edges) {
+      e.eleFrom = ele(e.pts[0]);
+      e.eleTo = ele(e.pts[e.pts.length - 1]);
+      e.length = lineLen(e.pts);
+      if (e.type !== "run") continue;
+      if (e.eleFrom === null || e.eleTo === null) {
+        e.dirCheck = "unknown";
+        e.flat = null;
+        continue;
+      }
+      const drop = e.eleFrom - e.eleTo;
+      e.dirCheck = drop >= -cfg.DIR_TOL_M ? "ok" : "conflict";
+      e.grade = e.length > 0 ? drop / e.length : null;
+      e.flat = e.grade !== null && e.length > 30 ? e.grade < cfg.FLAT_GRADE : null;
+    }
+    const eleMap = /* @__PURE__ */ new Map();
+    for (const e of edges) {
+      if (e.eleFrom != null) eleMap.set(e.fromOsm, e.eleFrom);
+      if (e.eleTo != null) eleMap.set(e.toOsm, e.eleTo);
+    }
+    const outOf = (id) => edges.filter((e) => e.fromOsm === id);
+    const inOf = (id) => edges.filter((e) => e.toOsm === id);
+    const walkLinks = [];
+    function addWalk(a, b, why) {
+      if (edges.some((e) => e.fromOsm === a && e.toOsm === b)) return;
+      const pa = osmNodes.get(a), pb = osmNodes.get(b);
+      edges.push({
+        type: "connector",
+        fromOsm: a,
+        toOsm: b,
+        pts: [pa, pb],
+        length: hav(pa, pb),
+        eleFrom: eleMap.get(a) ?? null,
+        eleTo: eleMap.get(b) ?? null,
+        name: "\u63A8\u7B97\u6B65\u884C\u8FDE\u63A5",
+        difficulty: 1,
+        flat: true,
+        linkOf: why,
+        walk: true
+      });
+      walkLinks.push({ from: a, to: b, dist_m: Math.round(hav(pa, pb)), why });
+    }
+    const verts = [...usedVertex];
+    for (const id of verts) {
+      const p = osmNodes.get(id), e0 = eleMap.get(id);
+      if (e0 == null) continue;
+      const runsIn = inOf(id).filter((e) => e.type !== "lift");
+      if (!outOf(id).length && runsIn.length) {
+        let best = null;
+        for (const m of verts) {
+          if (m === id || eleMap.get(m) == null || eleMap.get(m) > e0 + cfg.WALK_DEAD_CLIMB || !outOf(m).length) continue;
+          const d = hav(p, osmNodes.get(m));
+          if (d <= cfg.WALK_DEAD_M && (!best || d < best.d)) best = { m, d };
+        }
+        if (best) addWalk(id, best.m, `\u96EA\u9053\u7EC8\u70B9 ${runsIn[0].name || runsIn[0].osmWay} \u6CA1\u6709\u540E\u7EED`);
+      }
+      if (inOf(id).every((e) => e.type === "lift") && outOf(id).some((e) => e.type === "run")) {
+        let best = null;
+        for (const m of verts) {
+          if (m === id || eleMap.get(m) == null || e0 > eleMap.get(m) + cfg.WALK_SRC_CLIMB) continue;
+          if (!inOf(m).some((e) => e.type === "run")) continue;
+          const d = hav(p, osmNodes.get(m));
+          if (d <= cfg.WALK_SRC_M && (!best || d < best.d)) best = { m, d };
+        }
+        if (best) addWalk(best.m, id, `\u53EA\u80FD\u4E58\u7F06\u8F66\u5230\u8FBE\u7684\u8282\u70B9\uFF08${inOf(id).map((e) => e.name).join("\u3001") || "\u8D77\u70B9"}\uFF09`);
+      }
+    }
+    const nodeIdOf = (osmId) => osmId < 0 ? "D" + -osmId : "N" + osmId;
+    const round6 = (x) => Math.round(x * 1e6) / 1e6;
+    const nodes = [...usedVertex].map((id) => {
+      const p = osmNodes.get(id);
+      return { id: nodeIdOf(id), pos: [round6(p.lat), round6(p.lon)], kind: "vertex", attr: { pos: id < 0 ? "derived" : "osm" } };
+    });
+    const nodeEle = /* @__PURE__ */ new Map();
+    for (const e of edges) {
+      nodeEle.set(e.fromOsm, e.eleFrom);
+      nodeEle.set(e.toOsm, e.eleTo);
+    }
+    for (const n of nodes) {
+      const osmId = n.id[0] === "D" ? -Number(n.id.slice(1)) : Number(n.id.slice(1));
+      const v = nodeEle.get(osmId);
+      if (v !== null && v !== void 0) {
+        n.ele = Math.round(v);
+        n.attr.ele = "derived";
+      }
+    }
+    const outEdges = edges.map((e, i) => {
+      const base = {
+        id: e.type === "lift" ? `L${e.osmWay}` : e.type === "connector" ? `C${i}` : `R${e.osmWay}${e.part > 1 ? "_" + e.part : ""}`,
+        type: e.type,
+        from: nodeIdOf(e.fromOsm),
+        to: nodeIdOf(e.toOsm),
+        geometry: e.pts.map((p) => [round6(p.lat), round6(p.lon)]),
+        name: e.name,
+        sign: e.name,
+        // 路牌名称：暂用 OSM 名称，未核实是否与现场路牌一致
+        ref: e.ref || null,
+        length_m: Math.round(e.length)
+      };
+      if (e.type === "lift") {
+        return {
+          ...base,
+          liftType: e.liftType,
+          liftTypeZh: LIFT_ZH[e.liftType] || "\u7F06\u8F66",
+          duration_min: e.durationMin,
+          open: null,
+          attr: { name: e.name ? "osm" : "unknown", geometry: "osm", direction: "osm", open: "unknown", duration: e.durationMin ? "osm" : "unknown" },
+          source: { osmWay: e.osmWay }
+        };
+      }
+      if (e.type === "connector") {
+        return {
+          ...base,
+          difficulty: 1,
+          open: null,
+          flat: true,
+          attr: { name: "derived", geometry: "derived", direction: "derived", difficulty: "derived", open: "unknown", flat: "derived" },
+          note: e.walk ? `\u7A0B\u5E8F\u63A8\u7B97\u7684\u6B65\u884C\u8FDE\u63A5\uFF1A${e.linkOf}\uFF1BOSM \u4E2D\u6CA1\u6709\u8FD9\u6BB5\uFF0C\u5B9E\u9645\u80FD\u5426\u901A\u884C\u672A\u77E5` : `\u7A0B\u5E8F\u63A8\u7B97\u7684\u7F06\u8F66\u7AD9\u6B65\u884C\u8FDE\u63A5\uFF08${e.linkOf || ""}\uFF09\uFF0C\u5B9E\u9645\u8DEF\u5F84\u672A\u77E5`
+        };
+      }
+      return {
+        ...base,
+        difficulty: e.difficulty,
+        freeride: e.freeride || void 0,
+        open: null,
+        flat: e.flat,
+        grade: e.grade === void 0 || e.grade === null ? null : Math.round(e.grade * 1e3) / 1e3,
+        directionCheck: e.dirCheck,
+        attr: {
+          name: e.name ? "osm" : "unknown",
+          geometry: "osm",
+          direction: e.dirCheck === "ok" ? "derived" : e.dirCheck === "conflict" ? "conflict" : "osm",
+          difficulty: e.difficulty ? "osm" : "unknown",
+          open: "unknown",
+          flat: e.flat === null ? "unknown" : "derived"
+        },
+        source: { osmWay: e.osmWay, part: e.part }
+      };
+    });
+    const pois = [];
+    for (const e of outEdges.filter((x) => x.type === "lift" && x.name)) {
+      pois.push({ id: `P_${e.id}_bottom`, name: `${e.name} \u4E58\u8F66\u5904`, name_ja: `${e.name} \u4E57\u308A\u5834`, node: e.from, kind: "lift-bottom", aliases: [e.name], attr: { name: "osm", node: "osm" } });
+      pois.push({ id: `P_${e.id}_top`, name: `${e.name} \u4E0B\u8F66\u5904`, name_ja: `${e.name} \u964D\u308A\u5834`, node: e.to, kind: "lift-top", aliases: [], attr: { name: "osm", node: "osm" } });
+    }
+    for (const el of raw.elements) {
+      const t = el.tags || {};
+      if (!/^(restaurant|cafe|fast_food)$/.test(t.amenity || "") || !t.name) continue;
+      let p = el.type === "node" ? el : null;
+      if (!p && el.nodes) {
+        const ps = el.nodes.map((id) => osmNodes.get(id)).filter(Boolean);
+        if (!ps.length) continue;
+        p = { lat: ps.reduce((s, q) => s + q.lat, 0) / ps.length, lon: ps.reduce((s, q) => s + q.lon, 0) / ps.length };
+      }
+      if (!p || !inBox(p)) continue;
+      let best = null;
+      for (const n of nodes) {
+        const d = hav(p, { lat: n.pos[0], lon: n.pos[1] });
+        if (!best || d < best.d) best = { n, d };
+      }
+      if (!best || best.d > 200) continue;
+      pois.push({ id: `P_amenity_${el.id}`, name: t.name, name_ja: t.name, node: best.n.id, kind: "restaurant", aliases: [], dist_m: Math.round(best.d), attr: { name: "osm", node: "derived" }, note: `\u79BB\u6700\u8FD1\u7684\u96EA\u9053\u8282\u70B9\u7EA6 ${Math.round(best.d)} m\uFF08\u63A8\u7B97\uFF09` });
+    }
+    const outRuns = outEdges.filter((e) => e.type === "run");
+    const quality = {
+      runs: outRuns.length,
+      lifts: outEdges.filter((e) => e.type === "lift").length,
+      namedRuns: outRuns.filter((e) => e.name || e.ref).length,
+      unknownDifficulty: outRuns.filter((e) => e.difficulty == null).length,
+      derivedConnections: derivedJoins.length + liftLinks.filter((l) => l.linked).length + walkLinks.length,
+      unlinkedLiftEnds: liftLinks.filter((l) => !l.linked).length,
+      directionConflicts: outRuns.filter((e) => e.directionCheck === "conflict").length,
+      elevationKnown: nodes.filter((n) => n.ele != null).length / Math.max(1, nodes.length)
+    };
+    return {
+      schema: "xrsnow.resort/1",
+      id: opts.id,
+      name: opts.name,
+      region: opts.region || "",
+      dataStatus: "unverified",
+      allowRealGps: true,
+      disclaimer: "\u5730\u56FE\u6570\u636E\u6765\u81EA OpenStreetMap \u793E\u533A\u7F16\u8F91\uFF0C\u672A\u7ECF\u96EA\u573A\u6216\u672C\u9879\u76EE\u6838\u5B9E\uFF0C\u53EF\u80FD\u6709\u8BEF\u3001\u8FC7\u65F6\u6216\u7F3A\u5931\uFF08\u4F8B\u5982\u96EA\u9053\u5F00\u653E\u72B6\u6001\u4E00\u5F8B\u672A\u77E5\uFF09\u3002\u4EC5\u4F9B\u6D4B\u8BD5\uFF0C\u8BF7\u59CB\u7EC8\u4EE5\u73B0\u573A\u8DEF\u724C\u3001\u96EA\u573A\u5B98\u65B9\u5730\u56FE\u548C\u5DE1\u903B\u5458\u6307\u793A\u4E3A\u51C6\u3002",
+      crs: { type: "wgs84" },
+      provenance: {
+        source: "OpenStreetMap contributors\uFF08Overpass API \u5BFC\u51FA\uFF09",
+        license: "ODbL 1.0 \u2014 \xA9 OpenStreetMap contributors",
+        elevation: opts.elevationSource || "",
+        retrieved: opts.retrieved || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        importer: opts.importer || "nav/osm-import.js",
+        bbox: BBOX || null
+      },
+      attributeLegend: {
+        demo: "\u6F14\u793A\u5C5E\u6027\uFF08\u865A\u6784\uFF09",
+        unknown: "\u672A\u77E5",
+        osm: "\u6765\u81EA OSM\uFF0C\u672A\u6838\u5B9E",
+        derived: "\u7A0B\u5E8F\u63A8\u7B97\uFF0C\u672A\u6838\u5B9E",
+        conflict: "\u6570\u636E\u77DB\u76FE\uFF08\u4E0D\u53C2\u4E0E\u89C4\u5212\uFF09",
+        verified: "\u5DF2\u6838\u5B9E"
+      },
+      importReport: {
+        skipped,
+        derivedJoins,
+        liftLinks,
+        walkLinks,
+        directionConflicts: outEdges.filter((e) => e.directionCheck === "conflict").map((e) => ({ id: e.id, name: e.name, from_ele: nodeEle.get(e.from), grade: e.grade })),
+        quality,
+        params: { SNAP_M: cfg.SNAP_M, LIFT_LINK_M: cfg.LIFT_LINK_M, FLAT_GRADE: cfg.FLAT_GRADE, DIR_TOL_M: cfg.DIR_TOL_M }
+      },
+      nodes,
+      edges: outEdges,
+      pois
+    };
+  }
+
   // nav/companion.js
   var INTENTS = ["navigate", "confirm", "cancel", "stop", "pause", "resume", "distance", "repeat", "easier", "where", "chat", "unknown"];
   var INTENT_SCHEMA = {
@@ -2107,6 +2587,21 @@ var XRNav = (() => {
 
   // nav/core-entry.js
   var J = (x) => JSON.stringify(x);
+  var osm = {
+    skiAreaQuery: (lat, lon, radiusKm) => skiAreaQuery(lat, lon, radiusKm),
+    parseSkiAreas: (rawText, lat, lon) => J(parseSkiAreas(JSON.parse(rawText), lat, lon)),
+    downloadQuery: (bboxJson) => overpassQuery(padBbox(JSON.parse(bboxJson))),
+    elevationPoints: (rawText, optsJson) => J(elevationPoints(JSON.parse(rawText), JSON.parse(optsJson))),
+    // elevJson：{ "lat5,lon5": 海拔 }；返回 { ok, resort（JSON 文本）, quality, errors }
+    convert(rawText, optsJson, elevJson) {
+      const e = JSON.parse(elevJson || "{}");
+      const elev = Array.isArray(e) ? Object.fromEntries(e.map(([la, lo, v]) => [eleKey(la, lo), v])) : e;
+      const out = convertOsm(JSON.parse(rawText), JSON.parse(optsJson), (lat, lon) => elev[eleKey(lat, lon)] ?? null);
+      const check = loadResort(out);
+      const ok = !check.errors.length && out.edges.some((e2) => e2.type === "run");
+      return J({ ok, errors: check.errors, quality: out.importReport.quality, resort: JSON.stringify(out) });
+    }
+  };
   function scenarioTexts(resortJsonText, opts) {
     const r = loadResort(JSON.parse(resortJsonText));
     if (r.errors.length) return J({ ok: false, errors: r.errors });
