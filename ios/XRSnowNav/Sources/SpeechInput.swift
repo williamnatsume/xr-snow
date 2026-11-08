@@ -61,6 +61,9 @@ final class SpeechInput: NSObject {
     private var commandStart: Date?
     private let audioClock = AudioClock()
     private let audioGate = AudioGate()       // 没有回声消除时的退路：说话时不送声音
+    let realtimeTap = RealtimeTap()           // 实时对话：麦克风声音直接送云端
+    private var rtScheduledFrames: AVAudioFramePosition = 0
+    private var rtFirstChunkAt: Date?
     private var observers: [NSObjectProtocol] = []
     private var pendingUtterances = 0
     private var speakGeneration = 0
@@ -201,9 +204,12 @@ final class SpeechInput: NSObject {
         let builders = lanes.map(\.builder)
         let clock = audioClock
         let gate = audioGate
-        // 在音频线程里转换一次格式，再送给每个语言的识别器（不碰主线程状态）
+        let rt = realtimeTap
+        rt.setInputFormat(inFormat)
+        // 在音频线程里转换格式：送给本机识别器；实时对话时同时送给云端（24kHz PCM16）
         input.installTap(onBus: 0, bufferSize: 2048, format: inFormat) { buffer, _ in
             clock.tick()
+            if rt.feed(buffer) { return }        // 实时对话中：本机识别器暂停（不需要唤醒词，也省电）
             guard gate.isOpen else { return }
             SpeechInput.convert(buffer, with: conv, to: outFormat, into: builders)
         }
@@ -302,6 +308,44 @@ final class SpeechInput: NSObject {
             chunks += 1
             p.scheduleBuffer(out)
         }
+    }
+
+    // MARK: - 实时对话的声音
+
+    // 播放云端传回的一段声音（PCM16 24kHz 单声道），和雪人本地说话走同一个播放器（回声消除认得）
+    func playRealtime(_ data: Data) {
+        guard running else { return }
+        let frames = data.count / 2
+        guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(frames)) else { return }
+        buf.frameLength = AVAudioFrameCount(frames)
+        let out = buf.floatChannelData![0]
+        data.withUnsafeBytes { raw in
+            let src = raw.bindMemory(to: Int16.self)
+            for i in 0..<frames { out[i] = Float(Int16(littleEndian: src[i])) / 32768 }
+        }
+        if rtFirstChunkAt == nil { rtFirstChunkAt = Date(); rtScheduledFrames = 0 }
+        rtScheduledFrames += AVAudioFramePosition(frames)
+        if !player.isPlaying { player.play() }
+        setSpeaking(true)
+        player.scheduleBuffer(buf)
+    }
+
+    // 云端这段回答的声音发完了：等播完再算说完
+    func endRealtimeAudio() {
+        let gen = speakGeneration
+        pendingUtterances += 1
+        player.scheduleBuffer(AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: 1)!) { [weak self] in
+            Task { @MainActor in self?.rtFirstChunkAt = nil; self?.utteranceDone(gen) }
+        }
+    }
+
+    // 用户插话：立刻停播，返回这段回答已经播了多少毫秒（告诉云端截断）
+    func interruptRealtime() -> Int {
+        let elapsed = rtFirstChunkAt.map { Date().timeIntervalSince($0) * 1000 } ?? 0
+        let scheduledMs = Double(rtScheduledFrames) / 24
+        rtFirstChunkAt = nil
+        stopSpeaking()
+        return Int(min(elapsed, scheduledMs))
     }
 
     func stopSpeaking() {
@@ -417,6 +461,43 @@ final class SpeechInput: NSObject {
         if speaking && hasWake?(text) != true { return }
         NSLog("[语音] 一句话（停顿 %.1f 秒%@），选 %@：%@  [%@]", quiet, tooLong ? "，超过 7 秒强制结束" : "", lang, text, summary)
         onUtterance?(text, lang)
+    }
+}
+
+// 实时对话时把麦克风声音转成 24kHz PCM16 交给云端（音频线程调用 feed）
+final class RealtimeTap: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sink: ((Data) -> Void)?
+    private var converter: AVAudioConverter?
+    private var inFormat: AVAudioFormat?
+    private let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000, channels: 1, interleaved: true)!
+
+    func setInputFormat(_ f: AVAudioFormat) {
+        lock.lock(); inFormat = f; converter = AVAudioConverter(from: f, to: outFormat); lock.unlock()
+    }
+    func setSink(_ s: ((Data) -> Void)?) { lock.lock(); sink = s; lock.unlock() }
+    var active: Bool { lock.lock(); defer { lock.unlock() }; return sink != nil }
+
+    // 返回 true 表示正在实时对话（声音已送云端）
+    func feed(_ buffer: AVAudioPCMBuffer) -> Bool {
+        lock.lock()
+        let s = sink, c = converter
+        lock.unlock()
+        guard let s, let c else { return false }
+        let ratio = outFormat.sampleRate / buffer.format.sampleRate
+        let cap = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 256)
+        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: cap) else { return true }
+        var consumed = false
+        var err: NSError?
+        c.convert(to: out, error: &err) { _, status in
+            if consumed { status.pointee = .noDataNow; return nil }
+            consumed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard err == nil, out.frameLength > 0, let ch = out.int16ChannelData else { return true }
+        s(Data(bytes: ch[0], count: Int(out.frameLength) * 2))
+        return true
     }
 }
 

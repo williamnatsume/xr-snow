@@ -59,6 +59,12 @@ final class NavModel {
     var capabilities: [String] = []
     var fatalError: String?
     var hasKey = false
+    // 实时语音（OpenAI Realtime）
+    var realtimeOn: Bool { didSet { save() } }
+    var rtModel: RealtimeModel { didSet { save() } }
+    var rtVoice: String { didSet { save() } }
+    var hasOpenAIKey = false
+    var rtActive = false
     var testing = false
     var trackStats = TrackStats()
     var lastTrackFile: URL?
@@ -104,11 +110,15 @@ final class NavModel {
         cloudModel = CloudModel(rawValue: d.string(forKey: "cloudModel2") ?? "") ?? .haiku
         recordWhileNav = d.object(forKey: "recordWhileNav") as? Bool ?? true
         voiceId = d.string(forKey: "voiceId") ?? ""
+        realtimeOn = d.object(forKey: "realtimeOn") as? Bool ?? true
+        rtModel = RealtimeModel(rawValue: d.string(forKey: "rtModel") ?? "") ?? .full
+        rtVoice = d.string(forKey: "rtVoice") ?? "marin"
         SpeechService.preferredVoiceId["zh-CN"] = voiceId.isEmpty ? nil : voiceId
 
         do { core = try NavCore() } catch { fatalError = error.localizedDescription; return }
         brain.model = cloudModel
         hasKey = brain.hasKey
+        hasOpenAIKey = OpenAIKeychain.read() != nil
         location.onLocation = { [weak self] loc in self?.handle(loc) }
         location.onStatus = { [weak self] s in self?.status = s }
         input.hasWake = { [weak self] t in self?.session?.hasWake(t) ?? false }
@@ -132,6 +142,16 @@ final class NavModel {
         // 测试用：启动参数 -say "一句话" 可以重复多次，启动后按顺序当作用户说的话
         let args = ProcessInfo.processInfo.arguments
         let scripted = args.indices.filter { args[$0] == "-say" && $0 + 1 < args.count }.map { args[$0 + 1] }
+        // 测试用：-rtsay "一句话" 走实时语音（需要 OpenAI 密钥）
+        if let i = args.firstIndex(of: "-rtsay"), i + 1 < args.count {
+            let line = args[i + 1]
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                self.chat.append(ChatLine(who: .user, text: line))
+                await self.updateListening()
+                self.startRealtimeTurn(text: line, greet: false)
+            }
+        }
         if !scripted.isEmpty {
             Task {
                 for line in scripted {
@@ -147,6 +167,7 @@ final class NavModel {
         d.set(resortId, forKey: "resortId"); d.set(simStartNode, forKey: "simStartNode"); d.set(lang, forKey: "lang"); d.set(talkLang, forKey: "talkLang"); d.set(secondLang, forKey: "secondLang")
         d.set(voiceOn, forKey: "voiceOn"); d.set(wakeWordOn, forKey: "wakeWordOn"); d.set(mode.rawValue, forKey: "mode")
         d.set(simSpeed, forKey: "simSpeed"); d.set(cloudModel.rawValue, forKey: "cloudModel2"); d.set(recordWhileNav, forKey: "recordWhileNav"); d.set(voiceId, forKey: "voiceId")
+        d.set(realtimeOn, forKey: "realtimeOn"); d.set(rtModel.rawValue, forKey: "rtModel"); d.set(rtVoice, forKey: "rtVoice")
     }
 
     func loadResort() {
@@ -180,8 +201,19 @@ final class NavModel {
     func talkButton() {
         XueRenIntentState.pendingListen = false
         stopTalking()
+        if useRealtime {
+            Haptics.tap(); Chime.play()
+            Task { await updateListening(); startRealtimeTurn(text: nil, greet: false) }
+            return
+        }
         openCommandWindow(seconds: 8)
         Task { await updateListening() }
+    }
+
+    func setOpenAIKey(_ key: String) {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if k.isEmpty { OpenAIKeychain.delete() } else { OpenAIKeychain.save(k) }
+        hasOpenAIKey = OpenAIKeychain.read() != nil
     }
 
     func setKey(_ key: String) {
@@ -204,7 +236,7 @@ final class NavModel {
 
     // 需要麦克风：开了唤醒词，或者有打开的命令窗口
     private func updateListening() async {
-        let want = wakeWordOn || Date() < commandWindowUntil
+        let want = wakeWordOn || Date() < commandWindowUntil || rtActive
         if want && !input.running {
             speech.stop()
             await input.start(langs: listenLangs)
@@ -226,6 +258,8 @@ final class NavModel {
         openCommandWindow(seconds: 10)
         Haptics.tap()
         Chime.play()
+        // 实时语音：一听到“雪人”就先连上（用户还在说后半句时就在连，省时间）
+        if useRealtime { rtWaitingLocal = true; ensureRealtime(); return }
         // 0.7 秒后如果喊完“雪人”还没接着说，就回一声“我在”
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(700))
@@ -273,6 +307,115 @@ final class NavModel {
                 return (v.identifier, "\(v.name)（\(q)）")
             }
     }
+
+    // MARK: - 实时语音（OpenAI Realtime）
+
+    private var rtSession: RealtimeSession?
+    private var rtLastActivity = Date()
+    private var rtPendingText: String?
+    private var rtPendingGreet = false
+    private var rtFallbackText: String?
+    private var rtWaitingLocal = false     // 预先连接时，等本机把这句话听完再交给云端
+
+    var useRealtime: Bool { realtimeOn && hasOpenAIKey }
+
+    // 建立连接（如果还没有）；连上后由 startRealtimeTurn 决定先说什么
+    private func ensureRealtime() {
+        guard rtSession == nil, let session, let key = OpenAIKeychain.read(), let p = session.companionPrompt() else { return }
+        let tools: [[String: Any]] = (p.tools as? [[String: Any]] ?? []).map {
+            ["type": "function", "name": $0["name"] ?? "", "description": $0["description"] ?? "", "parameters": $0["input_schema"] ?? [:]]
+        }
+        let instructions = p.system + """
+
+        你现在通过实时语音和用户对话：直接听用户的声音，用自然、像真人朋友的语气和语调说话，语速轻快，可以有情绪。
+        每次只说一两句，说完就停，把话轮还给用户；用户插话时马上停下听。不要念出工具名字或 JSON。
+        """ + "\n【开始时的状态】" + contextLine()
+        let rt = RealtimeSession()
+        rtSession = rt
+        rtActive = true
+        rtLastActivity = Date()
+        rt.onReady = { [weak self] in
+            guard let self, !self.rtWaitingLocal else { return }
+            self.rtReady()
+        }
+        rt.onAudio = { [weak self] pcm in self?.input.playRealtime(pcm) }
+        rt.onAudioDone = { [weak self] in self?.input.endRealtimeAudio() }
+        rt.onUserSpeechStarted = { [weak self] in
+            guard let self, self.input.speaking else { return }
+            let played = self.input.interruptRealtime()
+            self.rtSession?.truncate(playedMs: played)
+        }
+        rt.onUserText = { [weak self] t in
+            guard let self else { return }
+            self.chat.append(ChatLine(who: .user, text: t))
+            self.history.append(BrainTurn(role: "user", text: t))
+        }
+        rt.onAssistantText = { [weak self] t in
+            guard let self else { return }
+            self.chat.append(ChatLine(who: .xueren, text: t, note: "实时 \(self.rtModel == .full ? "GPT" : "GPT mini")"))
+            self.rememberSpoken(t)
+            self.history.append(BrainTurn(role: "assistant", text: t))
+            if self.history.count > 16 { self.history.removeFirst(self.history.count - 16) }
+        }
+        rt.onToolCall = { [weak self] name, args in
+            guard let self, let session = self.session else { return "{}" }
+            self.configureSession()
+            let out = session.tool(name, argsJSON: args, nowMs: self.nowMs)
+            self.applyToolEvent(out)
+            self.flushSpeech()
+            return out
+        }
+        rt.onActivity = { [weak self] in self?.rtLastActivity = Date() }
+        rt.onClosed = { [weak self] reason in self?.rtClosed(reason) }
+        rt.connect(key: key, model: rtModel, voice: rtVoice, instructions: instructions, tools: tools)
+        Task { await updateListening() }
+    }
+
+    // 一轮对话开始：text = 唤醒时本机已经听清的话（直接发文字）；greet = 只喊了“雪人”，让它打个招呼
+    private func startRealtimeTurn(text: String?, greet: Bool) {
+        rtWaitingLocal = false
+        rtPendingText = text
+        rtPendingGreet = greet
+        rtFallbackText = text
+        if rtSession == nil { ensureRealtime() }
+        if rtSession?.ready == true { rtReady() }
+    }
+
+    private func rtReady() {
+        guard let rt = rtSession else { return }
+        rtFallbackText = nil
+        // 之后的麦克风声音直接送云端（本机识别器暂停）
+        input.realtimeTap.setSink { [weak rt] pcm in
+            Task { @MainActor in rt?.appendAudio(pcm) }
+        }
+        if let t = rtPendingText { rt.sendUserText(t) }
+        else if rtPendingGreet { rt.greet("用户刚喊了你的名字“雪人”。用一句很短、很自然的话回应，比如“我在，怎么了？”") }
+        rtPendingText = nil
+        rtPendingGreet = false
+        rtLastActivity = Date()
+    }
+
+    private func rtClosed(_ reason: String?) {
+        input.realtimeTap.setSink(nil)
+        rtSession = nil
+        rtActive = false
+        input.stopSpeaking()
+        if let reason {
+            status = "实时语音断开：\(reason)"
+            // 还没连上就断了：这句话交给 Claude / 离线规则处理
+            if let t = rtFallbackText { rtFallbackText = nil; Task { await command(t) } }
+        }
+        Task { await updateListening() }
+    }
+
+    // 20 秒没人说话：挂断实时连接（按时长计费，省钱），回到喊“雪人”唤醒
+    private func rtIdleCheck() {
+        guard let rt = rtSession, !input.speaking else { return }
+        if Date().timeIntervalSince(rtLastActivity) > 20 { rt.close() }
+        else if !rt.ready && Date().timeIntervalSince(rtLastActivity) > 8 { rt.close("连接超时") }
+    }
+
+    func endRealtime() { rtSession?.close() }
 
     // 查东西时先应的一声（换着说）
     private func fillerLine() -> String {
@@ -330,6 +473,13 @@ final class NavModel {
         let stripped = session.stripWake(text)
         let woke = session.hasWake(text)
         guard woke || Date() < commandWindowUntil else { NSLog("[唤醒] 没听到唤醒词，忽略：%@", text); return } // 没喊“雪人”的话不理会
+        if useRealtime && (woke || rtSession != nil) {
+            commandWindowUntil = .distantPast
+            commandWindowOpen = false
+            if !stripped.isEmpty { chat.append(ChatLine(who: .user, text: stripped)) }
+            startRealtimeTurn(text: stripped.isEmpty ? nil : stripped, greet: stripped.isEmpty && !acked)
+            return
+        }
         if stripped.isEmpty {
             if !acked { reply("我在", note: "唤醒") }
             openCommandWindow(seconds: 8)
@@ -575,6 +725,7 @@ final class NavModel {
 
     // 前台和后台（定位在跑时 App 不会被挂起）都会走这里
     private func everySecond() {
+        if rtActive { rtIdleCheck() }
         if commandWindowOpen && Date() >= commandWindowUntil {
             commandWindowOpen = false
             Task { await updateListening() }

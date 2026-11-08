@@ -43,7 +43,8 @@ struct StatusBar: View {
             Text("·")
             Text(model.mode.rawValue)
             Text("·")
-            Text(model.hasKey ? "云端理解" : "离线理解")
+            Text(model.rtActive ? "实时对话中" : model.useRealtime ? "实时语音" : model.hasKey ? "云端理解" : "离线理解")
+                .foregroundStyle(model.rtActive ? .green : .secondary)
             Spacer()
             if model.testing { Label("测试中", systemImage: "record.circle").foregroundStyle(.red) }
             if model.listening {
@@ -210,6 +211,7 @@ struct SettingsView: View {
     @Bindable var model: NavModel
     @Environment(\.dismiss) private var dismiss
     @State private var keyInput = ""
+    @State private var openAIKeyInput = ""
 
     var body: some View {
         NavigationStack {
@@ -259,6 +261,27 @@ struct SettingsView: View {
                     Toggle("随时喊“雪人”唤醒", isOn: $model.wakeWordOn)
                 } header: { Text("说话") } footer: {
                     Text("想让声音更像真人：iPhone 设置 → 辅助功能 → 朗读内容 → 声音 → 中文（中国大陆），下载标着“高级”或“增强”的声音（几百 MB），回来在这里选。iPhone 一次最多同时识别两种语言；雪人用你说话的语言回答。神乐的雪道名是日文假名，中文语音念不出来，所以神乐的转弯播报默认用日语；你说话和雪人回话仍然用中文。开着唤醒时 App 会一直用 iPhone 麦克风听（屏幕顶部有橙色点），更费电；大风时可能听不清。关掉后用大按钮、操作按钮或 Siri（“和雪人说话”）。")
+                }
+
+                Section {
+                    Toggle("实时语音对话", isOn: $model.realtimeOn)
+                    if model.hasOpenAIKey {
+                        Label("已保存 OpenAI 密钥", systemImage: "checkmark.seal").foregroundStyle(.green)
+                        Button("删除 OpenAI 密钥", role: .destructive) { model.setOpenAIKey("") }
+                    } else {
+                        SecureField("OpenAI API 密钥（sk-…）", text: $openAIKeyInput)
+                        Button("保存") { model.setOpenAIKey(openAIKeyInput); openAIKeyInput = "" }.disabled(openAIKeyInput.isEmpty)
+                    }
+                    Picker("模型", selection: $model.rtModel) {
+                        ForEach(RealtimeModel.allCases) { m in Text(m.label).tag(m) }
+                    }
+                    Picker("声音", selection: $model.rtVoice) {
+                        ForEach(["marin", "cedar", "coral", "sage", "shimmer", "ballad", "alloy", "ash", "echo", "verse"], id: \.self) { v in
+                            Text(v == "marin" || v == "cedar" ? "\(v)（推荐）" : v).tag(v)
+                        }
+                    }
+                } header: { Text("实时语音（OpenAI）") } footer: {
+                    Text("开着并且有密钥时：喊“雪人”后直接和 AI 语音对话（像打电话，可以随时插话），20 秒没人说话自动挂断，按时长计费。没网或失败时自动改用下面的 Claude / 离线理解。转弯播报始终由本机导航负责。")
                 }
 
                 Section {

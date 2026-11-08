@@ -190,6 +190,14 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
 - **声音**：用户手机上中日文声音全是“普通”音质（quality 1），所以机械。设置里加了“雪人的声音”选择 + 试听；自动选音质最高的。要像真人得让用户在 系统设置 → 辅助功能 → 朗读内容 → 声音 下载“高级 / 增强”声音。语速 ×1.06、音调 ×1.05。
 - 更像真人的下一步（未做）：云端语音合成（需要另一个服务和费用，且有网络延迟）。
 
+#### 实时语音：OpenAI Realtime（2026-11-08）
+- 选型：调研（Artificial Analysis / Getstream / Inworld）结论是 OpenAI Realtime 延迟最低、推理最强；Gemini Live（Project Astra 的底层）多语言覆盖更广。当前模型 `gpt-realtime-2.1` / `gpt-realtime-2.1-mini`（旧的 `gpt-realtime` / `gpt-realtime-mini` 已弃用，2027-01-20 停用；beta 头 `OpenAI-Beta: realtime=v1` 已移除）。
+- `RealtimeSession.swift`：WebSocket `wss://api.openai.com/v1/realtime?model=…`，`Authorization: Bearer`；`session.update`（type realtime、audio.input/output PCM 24kHz、server_vad 450 ms、近场降噪、输入转写 gpt-4o-mini-transcribe、tools = COMPANION_TOOLS 转成扁平 function 格式、reasoning low）；处理 output_audio.delta / done、transcript、speech_started（插话：停播 + conversation.item.truncate）、function_call_arguments.done（JS 执行工具 → function_call_output → response.done 后 response.create）、error（鉴权 / 额度错误时关闭并退回 Claude）。
+- 控制成本和隐私：唤醒词仍在本机识别；听到“雪人”就预先连接，本机把这句话听完后作为文字发过去（rtWaitingLocal），之后麦克风声音才直送云端（本机识别器暂停）；20 秒没人说话自动挂断。只喊“雪人”时让模型打个招呼。
+- 音频：麦克风 → `RealtimeTap` 在音频线程转 24kHz PCM16；回复声音 → 同一个 AVAudioPlayerNode 播（回声消除有效）。转弯播报仍由本机 TTS 负责。
+- 设置：实时语音开关、OpenAI 密钥（钥匙串，单独账户名）、模型、声音（marin / cedar 推荐）。启动参数 `-rtsay "一句话"` 测试实时路径。
+- 状态：编译通过、Claude 路径回归通过；**实时路径未实测**（等用户填 OpenAI 密钥）。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。
