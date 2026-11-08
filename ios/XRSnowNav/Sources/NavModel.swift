@@ -675,6 +675,7 @@ final class NavModel {
         if history.count > 16 { history.removeFirst(history.count - 16) }
 
         flushSpeech()
+        if streamed { XLog("[对话] 雪人（%@）：%@", via, say) }
         XLog("[计时] 理解+回复用了 %.2f 秒（%@）", Date().timeIntervalSince(t0), via)
         if !say.isEmpty && !streamed { reply(say, note: via) }
         // 对话中：回复后一小段时间内不用再喊雪人，可以直接接着说（问了问题时更长）

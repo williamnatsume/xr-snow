@@ -56,6 +56,13 @@
     "name": "チャレンジバーン",
     "gap_m": 11,
     "join": 2136146025
+   },
+   {
+    "way": 504305359,
+    "name": null,
+    "gap_m": 0,
+    "join": -3,
+    "why": "为连接 かぐら第1ロマンス 在雪道中间插入的节点"
    }
   ],
   "liftLinks": [
@@ -73,7 +80,9 @@
    {
     "lift": "みつまたロープウェイ",
     "end": "fromLift",
-    "linked": false
+    "linked": true,
+    "far": true,
+    "dist_m": 64
    },
    {
     "lift": "田代第6ロマンスリフト",
@@ -101,7 +110,9 @@
    {
     "lift": "かぐら第1ロマンス",
     "end": "toLift",
-    "linked": false
+    "linked": true,
+    "far": true,
+    "dist_m": 15
    },
    {
     "lift": "かぐら第1ロマンス",
@@ -154,14 +165,77 @@
     "why": "只能乘缆车到达的节点（田代第1ロマンスリフト）"
    }
   ],
+  "plazaLinks": [
+   {
+    "from": 2352131146,
+    "to": 1074427775,
+    "dist_m": 322
+   },
+   {
+    "from": 1074427788,
+    "to": 1074427792,
+    "dist_m": 294
+   },
+   {
+    "from": 1074427684,
+    "to": 1074427707,
+    "dist_m": 102
+   },
+   {
+    "from": 1074427684,
+    "to": 1074427718,
+    "dist_m": 64
+   },
+   {
+    "from": 4944771800,
+    "to": 4944771818,
+    "dist_m": 106
+   },
+   {
+    "from": 4944771776,
+    "to": 4944771800,
+    "dist_m": 60
+   },
+   {
+    "from": 4944771818,
+    "to": 4944771800,
+    "dist_m": 106
+   },
+   {
+    "from": 1074427718,
+    "to": 1074427684,
+    "dist_m": 64
+   },
+   {
+    "from": 1074427718,
+    "to": 1074427707,
+    "dist_m": 101
+   }
+  ],
+  "transferLinks": [
+   {
+    "from": "かぐらゴンドラ",
+    "to": "かぐら第1ロマンス",
+    "dist_m": 139
+   },
+   {
+    "from": "みつまたロープウェイ",
+    "to": "みつまた第1高速リフト",
+    "dist_m": 232
+   }
+  ],
   "directionConflicts": [],
   "quality": {
-   "runs": 108,
+   "runs": 109,
    "lifts": 18,
    "namedRuns": 65,
    "unknownDifficulty": 0,
-   "derivedConnections": 15,
-   "unlinkedLiftEnds": 4,
+   "derivedConnections": 29,
+   "unlinkedLiftEnds": 2,
+   "farLiftLinks": 2,
+   "plazaLinks": 9,
+   "transferLinks": 2,
+   "isolatedLifts": 0,
    "directionConflicts": 0,
    "elevationKnown": 1
   },
@@ -1368,6 +1442,19 @@
     "ele": "derived"
    },
    "ele": 1508
+  },
+  {
+   "id": "D3",
+   "pos": [
+    36.869829,
+    138.728554
+   ],
+   "kind": "vertex",
+   "attr": {
+    "pos": "derived",
+    "ele": "derived"
+   },
+   "ele": 1363
   }
  ],
  "edges": [
@@ -3658,7 +3745,7 @@
    "id": "R504305359_2",
    "type": "run",
    "from": "N4944771295",
-   "to": "N4944771291",
+   "to": "D3",
    "geometry": [
     [
      36.870244,
@@ -3669,22 +3756,14 @@
      138.728499
     ],
     [
-     36.869804,
-     138.728574
-    ],
-    [
-     36.869425,
-     138.728724
-    ],
-    [
-     36.869257,
-     138.728828
+     36.869829,
+     138.728554
     ]
    ],
    "name": null,
    "sign": null,
    "ref": null,
-   "length_m": 134,
+   "length_m": 66,
    "difficulty": 1,
    "open": null,
    "flat": false,
@@ -10209,6 +10288,117 @@
   {
    "id": "C131",
    "type": "connector",
+   "from": "N1074427777",
+   "to": "N1074427788",
+   "geometry": [
+    [
+     36.894276,
+     138.766331
+    ],
+    [
+     36.893709,
+     138.766453
+    ]
+   ],
+   "name": "みつまたロープウェイ 下车处步道",
+   "sign": "みつまたロープウェイ 下车处步道",
+   "ref": null,
+   "length_m": 64,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的远距离缆车站连接（みつまたロープウェイ，约 64 m，按海拔判断可走），实际路径未知",
+   "uncertain": true
+  },
+  {
+   "id": "R504305359_201",
+   "type": "run",
+   "from": "D3",
+   "to": "N4944771291",
+   "geometry": [
+    [
+     36.869829,
+     138.728554
+    ],
+    [
+     36.869804,
+     138.728574
+    ],
+    [
+     36.869425,
+     138.728724
+    ],
+    [
+     36.869257,
+     138.728828
+    ]
+   ],
+   "name": null,
+   "sign": null,
+   "ref": null,
+   "length_m": 68,
+   "difficulty": 1,
+   "open": null,
+   "flat": false,
+   "grade": 0.093,
+   "directionCheck": "ok",
+   "attr": {
+    "name": "unknown",
+    "geometry": "osm",
+    "direction": "derived",
+    "difficulty": "osm",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "source": {
+    "osmWay": 504305359,
+    "part": 201
+   }
+  },
+  {
+   "id": "C133",
+   "type": "connector",
+   "from": "D3",
+   "to": "N4944771197",
+   "geometry": [
+    [
+     36.869829,
+     138.728554
+    ],
+    [
+     36.869757,
+     138.728413
+    ]
+   ],
+   "name": "かぐら第1ロマンス 乘车处步道",
+   "sign": "かぐら第1ロマンス 乘车处步道",
+   "ref": null,
+   "length_m": 15,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的远距离缆车站连接（かぐら第1ロマンス，约 15 m，按海拔判断可走），实际路径未知",
+   "uncertain": true
+  },
+  {
+   "id": "C134",
+   "type": "connector",
    "from": "N4944771295",
    "to": "N1074427721",
    "geometry": [
@@ -10239,7 +10429,7 @@
    "note": "程序推算的步行连接：只能乘缆车到达的节点（かぐらゴンドラ）；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C132",
+   "id": "C135",
    "type": "connector",
    "from": "N4944771333",
    "to": "N1074427744",
@@ -10271,7 +10461,7 @@
    "note": "程序推算的步行连接：只能乘缆车到达的节点（かぐら第1高速リフト）；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C133",
+   "id": "C136",
    "type": "connector",
    "from": "N4944771363",
    "to": "N3446501735",
@@ -10303,7 +10493,7 @@
    "note": "程序推算的步行连接：只能乘缆车到达的节点（田代第8ロマンスリフト）；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C134",
+   "id": "C137",
    "type": "connector",
    "from": "N4944771728",
    "to": "N2136146053",
@@ -10335,7 +10525,7 @@
    "note": "程序推算的步行连接：只能乘缆车到达的节点（田代第2高速リフト）；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C135",
+   "id": "C138",
    "type": "connector",
    "from": "N4944771728",
    "to": "N4944771799",
@@ -10367,7 +10557,7 @@
    "note": "程序推算的步行连接：只能乘缆车到达的节点（田代第2ロマンスリフト）；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C136",
+   "id": "C139",
    "type": "connector",
    "from": "N4944771776",
    "to": "N4944771818",
@@ -10399,7 +10589,7 @@
    "note": "程序推算的步行连接：雪道终点 504305378 没有后续；OSM 中没有这段，实际能否通行未知"
   },
   {
-   "id": "C137",
+   "id": "C140",
    "type": "connector",
    "from": "D1",
    "to": "N4944771817",
@@ -10429,6 +10619,369 @@
     "flat": "derived"
    },
    "note": "程序推算的步行连接：只能乘缆车到达的节点（田代第1ロマンスリフト）；OSM 中没有这段，实际能否通行未知"
+  },
+  {
+   "id": "C141",
+   "type": "connector",
+   "from": "N2352131146",
+   "to": "N1074427775",
+   "geometry": [
+    [
+     36.895988,
+     138.775416
+    ],
+    [
+     36.893115,
+     138.775001
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 322,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（みつまたロープウェイ）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C142",
+   "type": "connector",
+   "from": "N1074427788",
+   "to": "N1074427792",
+   "geometry": [
+    [
+     36.893709,
+     138.766453
+    ],
+    [
+     36.896164,
+     138.765222
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 294,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（みつまた第1高速リフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C143",
+   "type": "connector",
+   "from": "N1074427684",
+   "to": "N1074427707",
+   "geometry": [
+    [
+     36.888837,
+     138.754916
+    ],
+    [
+     36.887947,
+     138.755199
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 102,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（みつまた第2ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C144",
+   "type": "connector",
+   "from": "N1074427684",
+   "to": "N1074427718",
+   "geometry": [
+    [
+     36.888837,
+     138.754916
+    ],
+    [
+     36.88852,
+     138.754315
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 64,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（かぐらゴンドラ）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C145",
+   "type": "connector",
+   "from": "N4944771800",
+   "to": "N4944771818",
+   "geometry": [
+    [
+     36.8474,
+     138.748122
+    ],
+    [
+     36.848267,
+     138.748611
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 106,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（田代第1ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C146",
+   "type": "connector",
+   "from": "N4944771776",
+   "to": "N4944771800",
+   "geometry": [
+    [
+     36.847831,
+     138.748537
+    ],
+    [
+     36.8474,
+     138.748122
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 60,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（田代第2ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C147",
+   "type": "connector",
+   "from": "N4944771818",
+   "to": "N4944771800",
+   "geometry": [
+    [
+     36.848267,
+     138.748611
+    ],
+    [
+     36.8474,
+     138.748122
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 106,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（田代第2ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C148",
+   "type": "connector",
+   "from": "N1074427718",
+   "to": "N1074427684",
+   "geometry": [
+    [
+     36.88852,
+     138.754315
+    ],
+    [
+     36.888837,
+     138.754916
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 64,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（みつまた第3ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C149",
+   "type": "connector",
+   "from": "N1074427718",
+   "to": "N1074427707",
+   "geometry": [
+    [
+     36.88852,
+     138.754315
+    ],
+    [
+     36.887947,
+     138.755199
+    ]
+   ],
+   "name": "推算广场步道",
+   "sign": "推算广场步道",
+   "ref": null,
+   "length_m": 101,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：雪道终点到缆车下站（みつまた第2ロマンスリフト）；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C150",
+   "type": "connector",
+   "from": "N1074427721",
+   "to": "N4944771197",
+   "geometry": [
+    [
+     36.870865,
+     138.727699
+    ],
+    [
+     36.869757,
+     138.728413
+    ]
+   ],
+   "name": "换乘步道（かぐらゴンドラ → かぐら第1ロマンス）",
+   "sign": "换乘步道（かぐらゴンドラ → かぐら第1ロマンス）",
+   "ref": null,
+   "length_m": 139,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：かぐらゴンドラ 下车后走到 かぐら第1ロマンス 乘车处；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
+  },
+  {
+   "id": "C151",
+   "type": "connector",
+   "from": "N1074427777",
+   "to": "N1074427792",
+   "geometry": [
+    [
+     36.894276,
+     138.766331
+    ],
+    [
+     36.896164,
+     138.765222
+    ]
+   ],
+   "name": "换乘步道（みつまたロープウェイ → みつまた第1高速リフト）",
+   "sign": "换乘步道（みつまたロープウェイ → みつまた第1高速リフト）",
+   "ref": null,
+   "length_m": 232,
+   "difficulty": 1,
+   "open": null,
+   "flat": true,
+   "attr": {
+    "name": "derived",
+    "geometry": "derived",
+    "direction": "derived",
+    "difficulty": "derived",
+    "open": "unknown",
+    "flat": "derived"
+   },
+   "note": "程序推算的步行连接：みつまたロープウェイ 下车后走到 みつまた第1高速リフト 乘车处；OSM 中没有这段，实际能否通行未知",
+   "uncertain": true
   }
  ],
  "pois": [

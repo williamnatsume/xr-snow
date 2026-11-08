@@ -145,7 +145,7 @@ const GENERIC = [
 
 export function genericPlaces(resort) {
   const ele = (node) => resort.nodes.get(node)?.ele;
-  const withEle = resort.pois.filter((p) => ele(p.node) != null);
+  const withEle = resort.pois.filter((p) => ele(p.node) != null && !p.isolated);
   const out = {};
   if (withEle.length) {
     out.summit = withEle.reduce((a, b) => (ele(b.node) > ele(a.node) ? b : a));
@@ -266,7 +266,8 @@ const T = {
     noRepeat: '还没有可以重复的提示。',
     km: (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}公里` : `${Math.round(m / 10) * 10}米`),
     sep: '、',
-    warnUnknownOpen: '注意开放状态未知。'
+    warnUnknownOpen: '注意开放状态未知。',
+    warnUncertain: '有一段是我推算的连接，到时候留意路牌。'
   },
   ja: {
     noDest: (ex) => `どこへ行きますか？例えば：${ex}`,
@@ -294,7 +295,8 @@ const T = {
     noRepeat: 'まだ繰り返す案内がありません。',
     km: (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}キロ` : `${Math.round(m / 10) * 10}メートル`),
     sep: '、',
-    warnUnknownOpen: '営業状況は不明です。'
+    warnUnknownOpen: '営業状況は不明です。',
+    warnUncertain: '一部は推測でつないだ区間なので、案内板を見てね。'
   }
 };
 
@@ -341,7 +343,7 @@ export function createCompanion(api) {
     const runs = p.edges.filter((e) => e.type === 'run' && e.ref).map((e) => api.lang() === 'ja' ? `${e.ref}番` : `${e.ref}号`);
     const via = [...new Set(runs)].slice(0, 4).join(L.sep);
     const km = api.lang() === 'ja' ? L.km(p.length) : (p.length / 1000).toFixed(1);
-    const warn = p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : '';
+    const warn = (p.edges.some((e) => e.uncertain) ? L.warnUncertain : '') + (p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : '');
     return L.summary(fromLabel, placeName(goal), diffName, km, Math.max(1, Math.round(p.time / 60)), via, warn);
   }
 
@@ -488,6 +490,7 @@ export function createCompanion(api) {
       max_difficulty: DIFF_ZH[pending.prefs.maxDifficulty] || '',
       lifts: p.liftCount || 0,
       route: runs,
+      uncertain_segments: p.edges.filter((e) => e.uncertain).length,
       warnings: p.warnings || []
     };
   }

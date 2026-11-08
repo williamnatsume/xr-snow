@@ -12,6 +12,11 @@
 export const OSM_CFG = {
   SNAP_M: 25,          // 雪道端点离其他雪道这么近时，推算为相连
   LIFT_LINK_M: 60,     // 缆车站离雪道节点这么近时，加一段步行连接
+  LIFT_LINK_FAR_M: 150, // 60 m 内没有雪道时，扩大到这么远再找（要求海拔合理，标为“远距离推算”）
+  LIFT_LINK_CLIMB: 15,  // 远距离连接最多允许往上走这么多米
+  PLAZA_M: 350,         // 雪场广场：雪道终点到缆车下站这么近、高差不大时，推算可以走过去（OSM 一般不画广场）
+  PLAZA_CLIMB: 12,
+  TRANSFER_DROP: 40,    // 缆车换乘：从上站走到另一条缆车下站，最多往下走这么多米
   FLAT_GRADE: 0.06,    // 平均坡度低于 6% 视为平路（推算，待实测）
   DIR_TOL_M: 3,        // 终点比起点高出超过 3 m，判定方向存疑
   WALK_DEAD_M: 80, WALK_DEAD_CLIMB: 10, WALK_SRC_M: 120, WALK_SRC_CLIMB: 15
@@ -226,6 +231,7 @@ export function convertOsm(rawIn, opts, elevation) {
   // 缆车站与雪道节点不相连时，补一段步行连接（推算）
   const pisteVertex = [...usedVertex].filter((id) => edges.some((e) => e.type === 'run' && (e.fromOsm === id || e.toOsm === id)));
   const liftLinks = [];
+  const unlinked = [];   // 60 m 内没连上的缆车站：有了高程后再试远距离连接
   for (const e of edges.filter((x) => x.type === 'lift')) {
     for (const [end, dir] of [[e.fromOsm, 'toLift'], [e.toOsm, 'fromLift']]) {
       if (pisteVertex.includes(end)) continue;
@@ -235,7 +241,7 @@ export function convertOsm(rawIn, opts, elevation) {
         const d = hav(p, osmNodes.get(v));
         if (d <= cfg.LIFT_LINK_M && (!best || d < best.d)) best = { v, d };
       }
-      if (!best) { liftLinks.push({ lift: e.name, end: dir, linked: false }); continue; }
+      if (!best) { unlinked.push({ e, end, dir, i: liftLinks.length }); liftLinks.push({ lift: e.name, end: dir, linked: false }); continue; }
       const a = dir === 'toLift' ? best.v : end, b = dir === 'toLift' ? end : best.v;
       edges.push({
         type: 'connector', fromOsm: a, toOsm: b,
@@ -264,6 +270,63 @@ export function convertOsm(rawIn, opts, elevation) {
   /* ---------- 推算步行连接（OSM 里没画、但现场一般可以走过去的短距离） ---------- */
   const eleMap = new Map();
   for (const e of edges) { if (e.eleFrom != null) eleMap.set(e.fromOsm, e.eleFrom); if (e.eleTo != null) eleMap.set(e.toOsm, e.eleTo); }
+
+  // 远距离缆车站连接：60 m 内没有雪道的缆车站，在 150 m 内找海拔合理的雪道节点
+  //   去乘车处（雪道 → 缆车下站）：最多往上走 15 m；离开下车处（缆车上站 → 雪道）：最多往上走 15 m
+  for (const u of unlinked) {
+    const p = osmNodes.get(u.end), pe = eleMap.get(u.end);
+    if (pe == null) continue;
+    let best = null;
+    const climbOk = (ve) => (u.dir === 'toLift' ? pe <= ve + cfg.LIFT_LINK_CLIMB : ve <= pe + cfg.LIFT_LINK_CLIMB);
+    for (const v of pisteVertex) {
+      const ve = eleMap.get(v);
+      if (ve == null || !climbOk(ve)) continue;
+      const d = hav(p, osmNodes.get(v));
+      if (d <= cfg.LIFT_LINK_FAR_M && (!best || d < best.d)) best = { v, d };
+    }
+    // 缆车站常常在雪道中间旁边，而不是雪道端点旁边：也看雪道中间离它最近的点（海拔按两端插值）
+    for (const e of edges) {
+      if (e.type !== 'run' || e.eleFrom == null || e.eleTo == null) continue;
+      const pr = projectOnLine(p, e.pts);
+      if (!pr || pr.d > cfg.LIFT_LINK_FAR_M || (best && pr.d >= best.d - 5)) continue;
+      const cum = [0];
+      for (let i = 1; i < e.pts.length; i++) cum.push(cum[i - 1] + hav(e.pts[i - 1], e.pts[i]));
+      const along = cum[pr.i] + (cum[pr.i + 1] - cum[pr.i]) * pr.t;
+      const f = cum[cum.length - 1] ? along / cum[cum.length - 1] : 0;
+      if (f < 0.05 || f > 0.95) continue;           // 太靠近端点：上面已经按端点处理
+      const ve = e.eleFrom + (e.eleTo - e.eleFrom) * f;
+      if (!climbOk(ve)) continue;
+      best = { split: e, pr, ve, d: pr.d };
+    }
+    if (!best) continue;
+    if (best.split) {
+      // 在这条雪道中间插一个推算节点，把雪道拆成两段
+      const e = best.split, { pr } = best;
+      const a0 = e.pts[pr.i], b0 = e.pts[pr.i + 1];
+      const nid = synthId--;
+      const np = { id: nid, lat: a0.lat + (b0.lat - a0.lat) * pr.t, lon: a0.lon + (b0.lon - a0.lon) * pr.t };
+      osmNodes.set(nid, np);
+      const second = { ...e, part: (e.part || 1) * 100 + 1, fromOsm: nid, pts: [np, ...e.pts.slice(pr.i + 1)], eleFrom: best.ve };
+      e.toOsm = nid; e.pts = [...e.pts.slice(0, pr.i + 1), np]; e.eleTo = best.ve;
+      e.length = lineLen(e.pts); second.length = lineLen(second.pts);
+      for (const x of [e, second]) {
+        if (x.eleFrom != null && x.eleTo != null && x.length > 0) { x.grade = (x.eleFrom - x.eleTo) / x.length; x.flat = x.length > 30 ? x.grade < cfg.FLAT_GRADE : null; }
+      }
+      edges.push(second);
+      usedVertex.add(nid); pisteVertex.push(nid); eleMap.set(nid, best.ve);
+      best.v = nid;
+      derivedJoins.push({ way: e.osmWay, name: e.name || null, gap_m: 0, join: nid, why: `为连接 ${u.e.name || '缆车'} 在雪道中间插入的节点` });
+    }
+    const a = u.dir === 'toLift' ? best.v : u.end, b = u.dir === 'toLift' ? u.end : best.v;
+    edges.push({
+      type: 'connector', fromOsm: a, toOsm: b, pts: [osmNodes.get(a), osmNodes.get(b)], length: best.d,
+      eleFrom: eleMap.get(a) ?? null, eleTo: eleMap.get(b) ?? null,
+      name: u.dir === 'toLift' ? `${u.e.name || '缆车'} 乘车处步道` : `${u.e.name || '缆车'} 下车处步道`,
+      difficulty: 1, flat: true, linkOf: u.e.name, far: true
+    });
+    usedVertex.add(a); usedVertex.add(b);
+    liftLinks[u.i] = { lift: u.e.name, end: u.dir, linked: true, far: true, dist_m: Math.round(best.d) };
+  }
   const outOf = (id) => edges.filter((e) => e.fromOsm === id);
   const inOf = (id) => edges.filter((e) => e.toOsm === id);
   const walkLinks = [];
@@ -303,6 +366,58 @@ export function convertOsm(rawIn, opts, elevation) {
     }
   }
 
+  // 雪场广场：雪道在缆车下站附近结束（没有后续雪道），高差不大 → 推算能走到附近的每个缆车下站
+  // （山脚的缆车往往围着一个广场，OSM 一般不画广场，结果滑下来只能“到达”其中一两条缆车）
+  const plazaLinks = [];
+  const liftBottoms = [...new Set(edges.filter((e) => e.type === 'lift').map((e) => e.fromOsm))];
+  for (const id of [...usedVertex]) {
+    const e0 = eleMap.get(id);
+    if (e0 == null) continue;
+    const runsIn = inOf(id).filter((e) => e.type === 'run');
+    const runsOut = outOf(id).filter((e) => e.type === 'run');
+    if (!runsIn.length || runsOut.length) continue;          // 只看雪道的终点
+    for (const lb of liftBottoms) {
+      if (lb === id) continue;
+      const le = eleMap.get(lb);
+      if (le == null || le > e0 + cfg.PLAZA_CLIMB || le < e0 - cfg.PLAZA_CLIMB) continue;
+      const d = hav(osmNodes.get(id), osmNodes.get(lb));
+      if (d > cfg.PLAZA_M || d < 1) continue;
+      if (edges.some((e) => e.fromOsm === id && e.toOsm === lb)) continue;
+      const pa = osmNodes.get(id), pb = osmNodes.get(lb);
+      edges.push({
+        type: 'connector', fromOsm: id, toOsm: lb, pts: [pa, pb], length: d, eleFrom: e0, eleTo: le,
+        name: '推算广场步道', difficulty: 1, flat: true, linkOf: `雪道终点到缆车下站（${edges.find((e) => e.type === 'lift' && e.fromOsm === lb)?.name || ''}）`, walk: true, far: true
+      });
+      plazaLinks.push({ from: id, to: lb, dist_m: Math.round(d) });
+    }
+  }
+
+  // 缆车换乘：一条缆车的上站旁边就是另一条缆车的下站（OSM 不画中间的平地）→ 推算可以走过去
+  const transferLinks = [];
+  const liftEdges = edges.filter((e) => e.type === 'lift');
+  for (const up of liftEdges) {
+    const te = eleMap.get(up.toOsm);
+    if (te == null) continue;
+    for (const nx of liftEdges) {
+      if (nx === up || nx.fromOsm === up.toOsm) continue;
+      const be = eleMap.get(nx.fromOsm);
+      if (be == null || be > te + cfg.PLAZA_CLIMB || be < te - cfg.TRANSFER_DROP) continue;
+      const d = hav(osmNodes.get(up.toOsm), osmNodes.get(nx.fromOsm));
+      if (d > cfg.PLAZA_M) continue;
+      if (edges.some((e) => e.fromOsm === up.toOsm && e.toOsm === nx.fromOsm)) continue;
+      edges.push({
+        type: 'connector', fromOsm: up.toOsm, toOsm: nx.fromOsm, pts: [osmNodes.get(up.toOsm), osmNodes.get(nx.fromOsm)], length: d,
+        eleFrom: te, eleTo: be, name: `换乘步道（${up.name || '缆车'} → ${nx.name || '缆车'}）`, difficulty: 1, flat: true,
+        linkOf: `${up.name || ''} 下车后走到 ${nx.name || ''} 乘车处`, walk: true, far: true
+      });
+      transferLinks.push({ from: up.name, to: nx.name, dist_m: Math.round(d) });
+    }
+  }
+
+  // 孤立的缆车：两头都没有雪道 / 步道相连（OSM 上只画了缆车），规划时自然用不到，在质量报告里提醒
+  const nonLiftAt = (id) => edges.some((e) => e.type !== 'lift' && (e.fromOsm === id || e.toOsm === id));
+  for (const e of edges) if (e.type === 'lift') e.isolated = !nonLiftAt(e.fromOsm) && !nonLiftAt(e.toOsm);
+
   /* ---------- 输出 ---------- */
   const nodeIdOf = (osmId) => (osmId < 0 ? 'D' + -osmId : 'N' + osmId);
   const round6 = (x) => Math.round(x * 1e6) / 1e6;
@@ -333,6 +448,7 @@ export function convertOsm(rawIn, opts, elevation) {
       return {
         ...base, liftType: e.liftType, liftTypeZh: LIFT_ZH[e.liftType] || '缆车',
         duration_min: e.durationMin, open: null,
+        ...(e.isolated ? { isolated: true, note: 'OSM 上这条缆车周围没有画雪道，无法规划经过它的路线' } : {}),
         attr: { name: e.name ? 'osm' : 'unknown', geometry: 'osm', direction: 'osm', open: 'unknown', duration: e.durationMin ? 'osm' : 'unknown' },
         source: { osmWay: e.osmWay }
       };
@@ -341,7 +457,10 @@ export function convertOsm(rawIn, opts, elevation) {
       return {
         ...base, difficulty: 1, open: null, flat: true,
         attr: { name: 'derived', geometry: 'derived', direction: 'derived', difficulty: 'derived', open: 'unknown', flat: 'derived' },
-        note: e.walk ? `程序推算的步行连接：${e.linkOf}；OSM 中没有这段，实际能否通行未知` : `程序推算的缆车站步行连接（${e.linkOf || ''}），实际路径未知`
+        note: e.walk ? `程序推算的步行连接：${e.linkOf}；OSM 中没有这段，实际能否通行未知`
+          : e.far ? `程序推算的远距离缆车站连接（${e.linkOf || ''}，约 ${Math.round(e.length)} m，按海拔判断可走），实际路径未知`
+          : `程序推算的缆车站步行连接（${e.linkOf || ''}），实际路径未知`,
+        ...(e.far ? { uncertain: true } : {})
       };
     }
     return {
@@ -366,8 +485,9 @@ export function convertOsm(rawIn, opts, elevation) {
   // 目的地：缆车乘车处/下车处 + OSM 上的餐厅（吸附到最近的图节点，推算）
   const pois = [];
   for (const e of outEdges.filter((x) => x.type === 'lift' && x.name)) {
-    pois.push({ id: `P_${e.id}_bottom`, name: `${e.name} 乘车处`, name_ja: `${e.name} 乗り場`, node: e.from, kind: 'lift-bottom', aliases: [e.name], attr: { name: 'osm', node: 'osm' } });
-    pois.push({ id: `P_${e.id}_top`, name: `${e.name} 下车处`, name_ja: `${e.name} 降り場`, node: e.to, kind: 'lift-top', aliases: [], attr: { name: 'osm', node: 'osm' } });
+    const iso = e.isolated ? { isolated: true } : {};
+    pois.push({ id: `P_${e.id}_bottom`, name: `${e.name} 乘车处`, name_ja: `${e.name} 乗り場`, node: e.from, kind: 'lift-bottom', aliases: [e.name], attr: { name: 'osm', node: 'osm' }, ...iso });
+    pois.push({ id: `P_${e.id}_top`, name: `${e.name} 下车处`, name_ja: `${e.name} 降り場`, node: e.to, kind: 'lift-top', aliases: [], attr: { name: 'osm', node: 'osm' }, ...iso });
   }
   for (const el of raw.elements) {
     const t = el.tags || {};
@@ -394,8 +514,12 @@ export function convertOsm(rawIn, opts, elevation) {
     lifts: outEdges.filter((e) => e.type === 'lift').length,
     namedRuns: outRuns.filter((e) => e.name || e.ref).length,
     unknownDifficulty: outRuns.filter((e) => e.difficulty == null).length,
-    derivedConnections: derivedJoins.length + liftLinks.filter((l) => l.linked).length + walkLinks.length,
+    derivedConnections: derivedJoins.length + liftLinks.filter((l) => l.linked).length + walkLinks.length + plazaLinks.length + transferLinks.length,
     unlinkedLiftEnds: liftLinks.filter((l) => !l.linked).length,
+    farLiftLinks: liftLinks.filter((l) => l.far).length,
+    plazaLinks: plazaLinks.length,
+    transferLinks: transferLinks.length,
+    isolatedLifts: outEdges.filter((e) => e.isolated).length,
     directionConflicts: outRuns.filter((e) => e.directionCheck === 'conflict').length,
     elevationKnown: nodes.filter((n) => n.ele != null).length / Math.max(1, nodes.length)
   };
@@ -426,6 +550,8 @@ export function convertOsm(rawIn, opts, elevation) {
       derivedJoins,
       liftLinks,
       walkLinks,
+      plazaLinks,
+      transferLinks,
       directionConflicts: outEdges.filter((e) => e.directionCheck === 'conflict').map((e) => ({ id: e.id, name: e.name, from_ele: nodeEle.get(e.from), grade: e.grade })),
       quality,
       params: { SNAP_M: cfg.SNAP_M, LIFT_LINK_M: cfg.LIFT_LINK_M, FLAT_GRADE: cfg.FLAT_GRADE, DIR_TOL_M: cfg.DIR_TOL_M }

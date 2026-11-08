@@ -1484,6 +1484,15 @@ var XRNav = (() => {
     // 雪道端点离其他雪道这么近时，推算为相连
     LIFT_LINK_M: 60,
     // 缆车站离雪道节点这么近时，加一段步行连接
+    LIFT_LINK_FAR_M: 150,
+    // 60 m 内没有雪道时，扩大到这么远再找（要求海拔合理，标为“远距离推算”）
+    LIFT_LINK_CLIMB: 15,
+    // 远距离连接最多允许往上走这么多米
+    PLAZA_M: 350,
+    // 雪场广场：雪道终点到缆车下站这么近、高差不大时，推算可以走过去（OSM 一般不画广场）
+    PLAZA_CLIMB: 12,
+    TRANSFER_DROP: 40,
+    // 缆车换乘：从上站走到另一条缆车下站，最多往下走这么多米
     FLAT_GRADE: 0.06,
     // 平均坡度低于 6% 视为平路（推算，待实测）
     DIR_TOL_M: 3,
@@ -1715,6 +1724,7 @@ out tags bb;`;
     }
     const pisteVertex = [...usedVertex].filter((id) => edges.some((e) => e.type === "run" && (e.fromOsm === id || e.toOsm === id)));
     const liftLinks = [];
+    const unlinked = [];
     for (const e of edges.filter((x) => x.type === "lift")) {
       for (const [end, dir] of [[e.fromOsm, "toLift"], [e.toOsm, "fromLift"]]) {
         if (pisteVertex.includes(end)) continue;
@@ -1725,6 +1735,7 @@ out tags bb;`;
           if (d <= cfg.LIFT_LINK_M && (!best || d < best.d)) best = { v, d };
         }
         if (!best) {
+          unlinked.push({ e, end, dir, i: liftLinks.length });
           liftLinks.push({ lift: e.name, end: dir, linked: false });
           continue;
         }
@@ -1763,6 +1774,75 @@ out tags bb;`;
     for (const e of edges) {
       if (e.eleFrom != null) eleMap.set(e.fromOsm, e.eleFrom);
       if (e.eleTo != null) eleMap.set(e.toOsm, e.eleTo);
+    }
+    for (const u of unlinked) {
+      const p = osmNodes.get(u.end), pe = eleMap.get(u.end);
+      if (pe == null) continue;
+      let best = null;
+      const climbOk = (ve) => u.dir === "toLift" ? pe <= ve + cfg.LIFT_LINK_CLIMB : ve <= pe + cfg.LIFT_LINK_CLIMB;
+      for (const v of pisteVertex) {
+        const ve = eleMap.get(v);
+        if (ve == null || !climbOk(ve)) continue;
+        const d = hav(p, osmNodes.get(v));
+        if (d <= cfg.LIFT_LINK_FAR_M && (!best || d < best.d)) best = { v, d };
+      }
+      for (const e of edges) {
+        if (e.type !== "run" || e.eleFrom == null || e.eleTo == null) continue;
+        const pr = projectOnLine(p, e.pts);
+        if (!pr || pr.d > cfg.LIFT_LINK_FAR_M || best && pr.d >= best.d - 5) continue;
+        const cum = [0];
+        for (let i = 1; i < e.pts.length; i++) cum.push(cum[i - 1] + hav(e.pts[i - 1], e.pts[i]));
+        const along = cum[pr.i] + (cum[pr.i + 1] - cum[pr.i]) * pr.t;
+        const f = cum[cum.length - 1] ? along / cum[cum.length - 1] : 0;
+        if (f < 0.05 || f > 0.95) continue;
+        const ve = e.eleFrom + (e.eleTo - e.eleFrom) * f;
+        if (!climbOk(ve)) continue;
+        best = { split: e, pr, ve, d: pr.d };
+      }
+      if (!best) continue;
+      if (best.split) {
+        const e = best.split, { pr } = best;
+        const a0 = e.pts[pr.i], b0 = e.pts[pr.i + 1];
+        const nid = synthId--;
+        const np = { id: nid, lat: a0.lat + (b0.lat - a0.lat) * pr.t, lon: a0.lon + (b0.lon - a0.lon) * pr.t };
+        osmNodes.set(nid, np);
+        const second = { ...e, part: (e.part || 1) * 100 + 1, fromOsm: nid, pts: [np, ...e.pts.slice(pr.i + 1)], eleFrom: best.ve };
+        e.toOsm = nid;
+        e.pts = [...e.pts.slice(0, pr.i + 1), np];
+        e.eleTo = best.ve;
+        e.length = lineLen(e.pts);
+        second.length = lineLen(second.pts);
+        for (const x of [e, second]) {
+          if (x.eleFrom != null && x.eleTo != null && x.length > 0) {
+            x.grade = (x.eleFrom - x.eleTo) / x.length;
+            x.flat = x.length > 30 ? x.grade < cfg.FLAT_GRADE : null;
+          }
+        }
+        edges.push(second);
+        usedVertex.add(nid);
+        pisteVertex.push(nid);
+        eleMap.set(nid, best.ve);
+        best.v = nid;
+        derivedJoins.push({ way: e.osmWay, name: e.name || null, gap_m: 0, join: nid, why: `\u4E3A\u8FDE\u63A5 ${u.e.name || "\u7F06\u8F66"} \u5728\u96EA\u9053\u4E2D\u95F4\u63D2\u5165\u7684\u8282\u70B9` });
+      }
+      const a = u.dir === "toLift" ? best.v : u.end, b = u.dir === "toLift" ? u.end : best.v;
+      edges.push({
+        type: "connector",
+        fromOsm: a,
+        toOsm: b,
+        pts: [osmNodes.get(a), osmNodes.get(b)],
+        length: best.d,
+        eleFrom: eleMap.get(a) ?? null,
+        eleTo: eleMap.get(b) ?? null,
+        name: u.dir === "toLift" ? `${u.e.name || "\u7F06\u8F66"} \u4E58\u8F66\u5904\u6B65\u9053` : `${u.e.name || "\u7F06\u8F66"} \u4E0B\u8F66\u5904\u6B65\u9053`,
+        difficulty: 1,
+        flat: true,
+        linkOf: u.e.name,
+        far: true
+      });
+      usedVertex.add(a);
+      usedVertex.add(b);
+      liftLinks[u.i] = { lift: u.e.name, end: u.dir, linked: true, far: true, dist_m: Math.round(best.d) };
     }
     const outOf = (id) => edges.filter((e) => e.fromOsm === id);
     const inOf = (id) => edges.filter((e) => e.toOsm === id);
@@ -1811,6 +1891,72 @@ out tags bb;`;
         if (best) addWalk(best.m, id, `\u53EA\u80FD\u4E58\u7F06\u8F66\u5230\u8FBE\u7684\u8282\u70B9\uFF08${inOf(id).map((e) => e.name).join("\u3001") || "\u8D77\u70B9"}\uFF09`);
       }
     }
+    const plazaLinks = [];
+    const liftBottoms = [...new Set(edges.filter((e) => e.type === "lift").map((e) => e.fromOsm))];
+    for (const id of [...usedVertex]) {
+      const e0 = eleMap.get(id);
+      if (e0 == null) continue;
+      const runsIn = inOf(id).filter((e) => e.type === "run");
+      const runsOut = outOf(id).filter((e) => e.type === "run");
+      if (!runsIn.length || runsOut.length) continue;
+      for (const lb of liftBottoms) {
+        if (lb === id) continue;
+        const le = eleMap.get(lb);
+        if (le == null || le > e0 + cfg.PLAZA_CLIMB || le < e0 - cfg.PLAZA_CLIMB) continue;
+        const d = hav(osmNodes.get(id), osmNodes.get(lb));
+        if (d > cfg.PLAZA_M || d < 1) continue;
+        if (edges.some((e) => e.fromOsm === id && e.toOsm === lb)) continue;
+        const pa = osmNodes.get(id), pb = osmNodes.get(lb);
+        edges.push({
+          type: "connector",
+          fromOsm: id,
+          toOsm: lb,
+          pts: [pa, pb],
+          length: d,
+          eleFrom: e0,
+          eleTo: le,
+          name: "\u63A8\u7B97\u5E7F\u573A\u6B65\u9053",
+          difficulty: 1,
+          flat: true,
+          linkOf: `\u96EA\u9053\u7EC8\u70B9\u5230\u7F06\u8F66\u4E0B\u7AD9\uFF08${edges.find((e) => e.type === "lift" && e.fromOsm === lb)?.name || ""}\uFF09`,
+          walk: true,
+          far: true
+        });
+        plazaLinks.push({ from: id, to: lb, dist_m: Math.round(d) });
+      }
+    }
+    const transferLinks = [];
+    const liftEdges = edges.filter((e) => e.type === "lift");
+    for (const up of liftEdges) {
+      const te = eleMap.get(up.toOsm);
+      if (te == null) continue;
+      for (const nx of liftEdges) {
+        if (nx === up || nx.fromOsm === up.toOsm) continue;
+        const be = eleMap.get(nx.fromOsm);
+        if (be == null || be > te + cfg.PLAZA_CLIMB || be < te - cfg.TRANSFER_DROP) continue;
+        const d = hav(osmNodes.get(up.toOsm), osmNodes.get(nx.fromOsm));
+        if (d > cfg.PLAZA_M) continue;
+        if (edges.some((e) => e.fromOsm === up.toOsm && e.toOsm === nx.fromOsm)) continue;
+        edges.push({
+          type: "connector",
+          fromOsm: up.toOsm,
+          toOsm: nx.fromOsm,
+          pts: [osmNodes.get(up.toOsm), osmNodes.get(nx.fromOsm)],
+          length: d,
+          eleFrom: te,
+          eleTo: be,
+          name: `\u6362\u4E58\u6B65\u9053\uFF08${up.name || "\u7F06\u8F66"} \u2192 ${nx.name || "\u7F06\u8F66"}\uFF09`,
+          difficulty: 1,
+          flat: true,
+          linkOf: `${up.name || ""} \u4E0B\u8F66\u540E\u8D70\u5230 ${nx.name || ""} \u4E58\u8F66\u5904`,
+          walk: true,
+          far: true
+        });
+        transferLinks.push({ from: up.name, to: nx.name, dist_m: Math.round(d) });
+      }
+    }
+    const nonLiftAt = (id) => edges.some((e) => e.type !== "lift" && (e.fromOsm === id || e.toOsm === id));
+    for (const e of edges) if (e.type === "lift") e.isolated = !nonLiftAt(e.fromOsm) && !nonLiftAt(e.toOsm);
     const nodeIdOf = (osmId) => osmId < 0 ? "D" + -osmId : "N" + osmId;
     const round6 = (x) => Math.round(x * 1e6) / 1e6;
     const nodes = [...usedVertex].map((id) => {
@@ -1850,6 +1996,7 @@ out tags bb;`;
           liftTypeZh: LIFT_ZH[e.liftType] || "\u7F06\u8F66",
           duration_min: e.durationMin,
           open: null,
+          ...e.isolated ? { isolated: true, note: "OSM \u4E0A\u8FD9\u6761\u7F06\u8F66\u5468\u56F4\u6CA1\u6709\u753B\u96EA\u9053\uFF0C\u65E0\u6CD5\u89C4\u5212\u7ECF\u8FC7\u5B83\u7684\u8DEF\u7EBF" } : {},
           attr: { name: e.name ? "osm" : "unknown", geometry: "osm", direction: "osm", open: "unknown", duration: e.durationMin ? "osm" : "unknown" },
           source: { osmWay: e.osmWay }
         };
@@ -1861,7 +2008,8 @@ out tags bb;`;
           open: null,
           flat: true,
           attr: { name: "derived", geometry: "derived", direction: "derived", difficulty: "derived", open: "unknown", flat: "derived" },
-          note: e.walk ? `\u7A0B\u5E8F\u63A8\u7B97\u7684\u6B65\u884C\u8FDE\u63A5\uFF1A${e.linkOf}\uFF1BOSM \u4E2D\u6CA1\u6709\u8FD9\u6BB5\uFF0C\u5B9E\u9645\u80FD\u5426\u901A\u884C\u672A\u77E5` : `\u7A0B\u5E8F\u63A8\u7B97\u7684\u7F06\u8F66\u7AD9\u6B65\u884C\u8FDE\u63A5\uFF08${e.linkOf || ""}\uFF09\uFF0C\u5B9E\u9645\u8DEF\u5F84\u672A\u77E5`
+          note: e.walk ? `\u7A0B\u5E8F\u63A8\u7B97\u7684\u6B65\u884C\u8FDE\u63A5\uFF1A${e.linkOf}\uFF1BOSM \u4E2D\u6CA1\u6709\u8FD9\u6BB5\uFF0C\u5B9E\u9645\u80FD\u5426\u901A\u884C\u672A\u77E5` : e.far ? `\u7A0B\u5E8F\u63A8\u7B97\u7684\u8FDC\u8DDD\u79BB\u7F06\u8F66\u7AD9\u8FDE\u63A5\uFF08${e.linkOf || ""}\uFF0C\u7EA6 ${Math.round(e.length)} m\uFF0C\u6309\u6D77\u62D4\u5224\u65AD\u53EF\u8D70\uFF09\uFF0C\u5B9E\u9645\u8DEF\u5F84\u672A\u77E5` : `\u7A0B\u5E8F\u63A8\u7B97\u7684\u7F06\u8F66\u7AD9\u6B65\u884C\u8FDE\u63A5\uFF08${e.linkOf || ""}\uFF09\uFF0C\u5B9E\u9645\u8DEF\u5F84\u672A\u77E5`,
+          ...e.far ? { uncertain: true } : {}
         };
       }
       return {
@@ -1885,8 +2033,9 @@ out tags bb;`;
     });
     const pois = [];
     for (const e of outEdges.filter((x) => x.type === "lift" && x.name)) {
-      pois.push({ id: `P_${e.id}_bottom`, name: `${e.name} \u4E58\u8F66\u5904`, name_ja: `${e.name} \u4E57\u308A\u5834`, node: e.from, kind: "lift-bottom", aliases: [e.name], attr: { name: "osm", node: "osm" } });
-      pois.push({ id: `P_${e.id}_top`, name: `${e.name} \u4E0B\u8F66\u5904`, name_ja: `${e.name} \u964D\u308A\u5834`, node: e.to, kind: "lift-top", aliases: [], attr: { name: "osm", node: "osm" } });
+      const iso = e.isolated ? { isolated: true } : {};
+      pois.push({ id: `P_${e.id}_bottom`, name: `${e.name} \u4E58\u8F66\u5904`, name_ja: `${e.name} \u4E57\u308A\u5834`, node: e.from, kind: "lift-bottom", aliases: [e.name], attr: { name: "osm", node: "osm" }, ...iso });
+      pois.push({ id: `P_${e.id}_top`, name: `${e.name} \u4E0B\u8F66\u5904`, name_ja: `${e.name} \u964D\u308A\u5834`, node: e.to, kind: "lift-top", aliases: [], attr: { name: "osm", node: "osm" }, ...iso });
     }
     for (const el of raw.elements) {
       const t = el.tags || {};
@@ -1912,8 +2061,12 @@ out tags bb;`;
       lifts: outEdges.filter((e) => e.type === "lift").length,
       namedRuns: outRuns.filter((e) => e.name || e.ref).length,
       unknownDifficulty: outRuns.filter((e) => e.difficulty == null).length,
-      derivedConnections: derivedJoins.length + liftLinks.filter((l) => l.linked).length + walkLinks.length,
+      derivedConnections: derivedJoins.length + liftLinks.filter((l) => l.linked).length + walkLinks.length + plazaLinks.length + transferLinks.length,
       unlinkedLiftEnds: liftLinks.filter((l) => !l.linked).length,
+      farLiftLinks: liftLinks.filter((l) => l.far).length,
+      plazaLinks: plazaLinks.length,
+      transferLinks: transferLinks.length,
+      isolatedLifts: outEdges.filter((e) => e.isolated).length,
       directionConflicts: outRuns.filter((e) => e.directionCheck === "conflict").length,
       elevationKnown: nodes.filter((n) => n.ele != null).length / Math.max(1, nodes.length)
     };
@@ -1947,6 +2100,8 @@ out tags bb;`;
         derivedJoins,
         liftLinks,
         walkLinks,
+        plazaLinks,
+        transferLinks,
         directionConflicts: outEdges.filter((e) => e.directionCheck === "conflict").map((e) => ({ id: e.id, name: e.name, from_ele: nodeEle.get(e.from), grade: e.grade })),
         quality,
         params: { SNAP_M: cfg.SNAP_M, LIFT_LINK_M: cfg.LIFT_LINK_M, FLAT_GRADE: cfg.FLAT_GRADE, DIR_TOL_M: cfg.DIR_TOL_M }
@@ -2068,7 +2223,7 @@ out tags bb;`;
   ];
   function genericPlaces(resort) {
     const ele = (node) => resort.nodes.get(node)?.ele;
-    const withEle = resort.pois.filter((p) => ele(p.node) != null);
+    const withEle = resort.pois.filter((p) => ele(p.node) != null && !p.isolated);
     const out = {};
     if (withEle.length) {
       out.summit = withEle.reduce((a, b) => ele(b.node) > ele(a.node) ? b : a);
@@ -2186,7 +2341,8 @@ out tags bb;`;
       noRepeat: "\u8FD8\u6CA1\u6709\u53EF\u4EE5\u91CD\u590D\u7684\u63D0\u793A\u3002",
       km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u516C\u91CC` : `${Math.round(m / 10) * 10}\u7C73`,
       sep: "\u3001",
-      warnUnknownOpen: "\u6CE8\u610F\u5F00\u653E\u72B6\u6001\u672A\u77E5\u3002"
+      warnUnknownOpen: "\u6CE8\u610F\u5F00\u653E\u72B6\u6001\u672A\u77E5\u3002",
+      warnUncertain: "\u6709\u4E00\u6BB5\u662F\u6211\u63A8\u7B97\u7684\u8FDE\u63A5\uFF0C\u5230\u65F6\u5019\u7559\u610F\u8DEF\u724C\u3002"
     },
     ja: {
       noDest: (ex) => `\u3069\u3053\u3078\u884C\u304D\u307E\u3059\u304B\uFF1F\u4F8B\u3048\u3070\uFF1A${ex}`,
@@ -2213,7 +2369,8 @@ out tags bb;`;
       noRepeat: "\u307E\u3060\u7E70\u308A\u8FD4\u3059\u6848\u5185\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       km: (m) => m >= 1e3 ? `${(m / 1e3).toFixed(1)}\u30AD\u30ED` : `${Math.round(m / 10) * 10}\u30E1\u30FC\u30C8\u30EB`,
       sep: "\u3001",
-      warnUnknownOpen: "\u55B6\u696D\u72B6\u6CC1\u306F\u4E0D\u660E\u3067\u3059\u3002"
+      warnUnknownOpen: "\u55B6\u696D\u72B6\u6CC1\u306F\u4E0D\u660E\u3067\u3059\u3002",
+      warnUncertain: "\u4E00\u90E8\u306F\u63A8\u6E2C\u3067\u3064\u306A\u3044\u3060\u533A\u9593\u306A\u306E\u3067\u3001\u6848\u5185\u677F\u3092\u898B\u3066\u306D\u3002"
     }
   };
   function createCompanion(api) {
@@ -2253,7 +2410,7 @@ out tags bb;`;
       const runs = p.edges.filter((e) => e.type === "run" && e.ref).map((e) => api.lang() === "ja" ? `${e.ref}\u756A` : `${e.ref}\u53F7`);
       const via = [...new Set(runs)].slice(0, 4).join(L.sep);
       const km = api.lang() === "ja" ? L.km(p.length) : (p.length / 1e3).toFixed(1);
-      const warn = p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : "";
+      const warn = (p.edges.some((e) => e.uncertain) ? L.warnUncertain : "") + (p.edges.some((e) => e.open == null) ? L.warnUnknownOpen : "");
       return L.summary(fromLabel, placeName(goal), diffName, km, Math.max(1, Math.round(p.time / 60)), via, warn);
     }
     function fail(text) {
@@ -2408,6 +2565,7 @@ out tags bb;`;
         max_difficulty: DIFF_ZH[pending.prefs.maxDifficulty] || "",
         lifts: p.liftCount || 0,
         route: runs,
+        uncertain_segments: p.edges.filter((e) => e.uncertain).length,
         warnings: p.warnings || []
       };
     }

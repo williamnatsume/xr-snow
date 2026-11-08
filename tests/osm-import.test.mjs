@@ -7,6 +7,8 @@ import { ROOT } from './helpers.mjs';
 import { convertOsm, elevationPoints, eleKey, parseSkiAreas, overpassQuery, padBbox } from '../nav/osm-import.js';
 import { osm } from '../nav/core-entry.js';
 import { loadResort } from '../nav/resort.js';
+import { planRoute } from '../nav/planner.js';
+import { genericPlaces } from '../nav/companion.js';
 
 const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/osm/kagura-overpass.json'), 'utf8'));
 const cache = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/osm/gsi-elev-cache.json'), 'utf8'));
@@ -19,7 +21,7 @@ test('转换：神乐数据结果与已提交的 resorts/kagura-osm.json 一致�
   assert.deepEqual(out.pois.map((p) => p.id), ref.pois.map((p) => p.id));
   assert.equal(loadResort(out).errors.length, 0);
   const q = out.importReport.quality;
-  assert.equal(q.runs, 108);
+  assert.equal(q.runs, 109);
   assert.equal(q.lifts, 18);
 });
 
@@ -52,4 +54,21 @@ test('找雪场：解析 landuse=winter_sports 区域，按“在里面 / 距离
   assert.equal(a[0].inside, true);
   assert.equal(a[0].bbox.minLat, 36.84);
   assert.match(overpassQuery(padBbox(a[0].bbox)), /piste:type/);
+});
+
+test('自动修补：神乐山脚 → 山顶能连通，走的是现实中的缆车顺序；推算的路段带 uncertain 标记', () => {
+  const out = convertOsm(raw, OPTS, (lat, lon) => cache[eleKey(lat, lon)] ?? null);
+  const R = loadResort(out);
+  const g = genericPlaces(R);
+  const p = planRoute(R, { startNode: g.base.node, goalNode: g.summit.node }, { maxDifficulty: 4, allowUnknownDifficulty: true });
+  assert.ok(p.ok, p.reason);
+  assert.deepEqual(p.edges.filter((e) => e.type === 'lift').map((e) => e.name),
+    ['みつまたロープウェイ', 'みつまた第1高速リフト', 'かぐらゴンドラ', 'かぐら第1高速リフト', 'かぐら第5ロマンスリフト']);
+  const q = out.importReport.quality;
+  assert.ok(q.transferLinks >= 1 && q.plazaLinks >= 1);
+  assert.ok(out.edges.filter((e) => e.type === 'connector' && e.uncertain).length >= q.transferLinks + q.plazaLinks);
+  // 缆车站之间两两可达：只剩田代索道下站（从停车场进入；みつまた索道下站可以从下山コース滑到）
+  const stations = out.pois.filter((x) => x.kind === 'lift-bottom' || x.kind === 'lift-top');
+  const unreachable = stations.filter((b) => !stations.some((a) => a !== b && planRoute(R, { startNode: a.node, goalNode: b.node }, { maxDifficulty: 4, allowUnknownDifficulty: true }).ok));
+  assert.deepEqual(unreachable.map((x) => x.name), ['田代ロープウェー 乘车处']);
 });
