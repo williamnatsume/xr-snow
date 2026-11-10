@@ -260,6 +260,17 @@ xcrun devicectl device process launch --device $UDID --terminate-existing --cons
   - 位置：没在导航时（真实 GPS）底部显示“你在 X 雪道，往下约 N 米有个岔口”（`companion.here()`：匹配所在雪道，沿唯一的下行方向找到第一个岔口），地图上闪烁圈标出；不在雪场范围显示提示。“我在哪”的回答和 get_status 也带上这些。模拟模式没在导航时显示手机自己的定位（MapKit UserAnnotation）。
   - 修：导航结束后地图不再残留旧路线。57 个测试通过；模拟器上截图确认预览 → 出发 → 跟随、说“看看地图”打开；已装 iPhone。真实 GPS 的“你在 X 雪道”只在 node 测试里验证（神乐坐标），没在雪场实测。
 
+#### 小队雪人 Agent：集合规划核心（2026-11-10，iPhone 上的云端会话）
+用户构想：一队几个人，A 对雪人说“大家去 X 集合”，Agent 根据每个人的位置算出各自最快的走法，分别告诉 B、C、D、E。
+- 第 1 步（已完成，纯 JS，未接入 App）：`nav/gather.js`
+  - `planGather(resort, members, { goalNode })`：队员 `{ id, name, at: { node } | { edgeId, s }, prefs }`。每人按自己的位置和难度上限用 `planRoute` 规划（与导航一致：不逆行、不进关闭 / 超难度雪道、到不了不放宽，返回原因和提示）。在雪道中段时只能沿当前边往下，已滑过的部分不计时间。返回每人路线和预计时间、到齐时间、最晚的人。
+  - 不给 `goalNode` 时自动选集合点（`chooseMeetingPoint`）：候选 = POI + 缆车上下站；只选所有人都能到的，最晚到的人用时最短，一样时总用时短的优先。
+  - `gatherMessages(resort, plan, 发起人 id)`：发给每个队员的话（集合点、几分钟到、前 3 步路线，用 `spokenName` 叫法，同名连续路段合并）+ 给发起人的汇总（通知了几人、到齐时间、谁最晚、谁到不了）。
+  - `parseGather(text, resort)`：本地规则听懂“大家到 X 集合 / 大家集合”（没说地点 = 自动选）。
+  - 测试 `tests/gather.test.mjs`（虚构雪场五人小队 + 神乐数据检查叫法），共 66 个测试通过。神乐上 5 人自动选集合点耗时约 2 ms。
+  - 时间估计用 `planner.js` 的 COST（滑行速度、缆车排队 3 分钟），都是待实测的初始值。
+- 后续（未做）：② 服务器（建队 / 邀请码、位置共享，只在队内可见、可停止）；③ 接入雪人（`companion.js` 加集合意图、云端工具，`core-entry.js` 导出给 App，重跑 `npm run build:ios`），收到指令后直接开始导航到集合点；④ 推送通知（需要付费开发者账号）、山上信号差时的离线处理（显示位置的时间、指令补发）、掉队 / 长时间不动提醒队长。
+
 ## 5. Mac 开工步骤（给 Mac 上的 Claude Code）
 
 用户会授权较宽的权限，但以下事项**必须由用户亲自完成**，不要尝试代替：输入 Apple ID 密码 / 两步验证码、输入 macOS 管理员密码（sudo）、在 iPhone 上点“信任”和开启开发者模式、在 Xcode 界面选择签名团队。
