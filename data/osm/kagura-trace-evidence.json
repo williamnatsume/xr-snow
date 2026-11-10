@@ -1,0 +1,1485 @@
+{
+ "source": "OpenStreetMap public GPS traces (trackpoints API)",
+ "retrieved": "2026-11-08T12:58:51.398Z",
+ "resort": "kagura-osm",
+ "summary": {
+  "traceSegments": 25,
+  "tracePoints": 2738,
+  "runs": 109,
+  "runsWithTraces": 14,
+  "runLengthCovered": 3353,
+  "runLengthTotal": 36478,
+  "inferredConnectors": 25,
+  "inferredSupported": 9,
+  "offMapSkiing": 6,
+  "offMapLikelySkiing": 0
+ },
+ "edges": [
+  {
+   "id": "R226378418",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 483,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R226378418_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 74,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305345",
+   "type": "run",
+   "name": "下山コース",
+   "inferred": false,
+   "length": 1974,
+   "coverage": 0.12,
+   "traces": 1
+  },
+  {
+   "id": "R504305346",
+   "type": "run",
+   "name": "大会バーン",
+   "inferred": false,
+   "length": 307,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305347",
+   "type": "run",
+   "name": "大会バーン",
+   "inferred": false,
+   "length": 346,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305347_2",
+   "type": "run",
+   "name": "大会バーン",
+   "inferred": false,
+   "length": 504,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305348",
+   "type": "run",
+   "name": "ファミリーコース",
+   "inferred": false,
+   "length": 241,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305348_2",
+   "type": "run",
+   "name": "ファミリーコース",
+   "inferred": false,
+   "length": 847,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305349",
+   "type": "run",
+   "name": "ゴンドラコース",
+   "inferred": false,
+   "length": 3397,
+   "coverage": 0.49,
+   "traces": 3
+  },
+  {
+   "id": "R504305349_2",
+   "type": "run",
+   "name": "ゴンドラコース",
+   "inferred": false,
+   "length": 51,
+   "coverage": 0.75,
+   "traces": 1
+  },
+  {
+   "id": "R504305351",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 185,
+   "coverage": 0.18,
+   "traces": 1
+  },
+  {
+   "id": "R504305352",
+   "type": "run",
+   "name": "林間エキスパートコース",
+   "inferred": false,
+   "length": 3,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305352_2",
+   "type": "run",
+   "name": "林間エキスパートコース",
+   "inferred": false,
+   "length": 628,
+   "coverage": 0.09,
+   "traces": 1
+  },
+  {
+   "id": "R504305352_3",
+   "type": "run",
+   "name": "林間エキスパートコース",
+   "inferred": false,
+   "length": 538,
+   "coverage": 0.14,
+   "traces": 1
+  },
+  {
+   "id": "R504305353",
+   "type": "run",
+   "name": "かぐら第5ロマンスリフト～かぐらメイン",
+   "inferred": false,
+   "length": 336,
+   "coverage": 0.67,
+   "traces": 2
+  },
+  {
+   "id": "R504305353_2",
+   "type": "run",
+   "name": "かぐら第5ロマンスリフト～かぐらメイン",
+   "inferred": false,
+   "length": 61,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305354",
+   "type": "run",
+   "name": "ジャイアントコース",
+   "inferred": false,
+   "length": 571,
+   "coverage": 0.1,
+   "traces": 1
+  },
+  {
+   "id": "R504305355",
+   "type": "run",
+   "name": "テクニカルコース",
+   "inferred": false,
+   "length": 515,
+   "coverage": 0.22,
+   "traces": 1
+  },
+  {
+   "id": "R504305357",
+   "type": "run",
+   "name": "かぐらメインゲレンデ迂回",
+   "inferred": false,
+   "length": 263,
+   "coverage": 0.2,
+   "traces": 1
+  },
+  {
+   "id": "R504305357_2",
+   "type": "run",
+   "name": "かぐらメインゲレンデ迂回",
+   "inferred": false,
+   "length": 480,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305358",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 342,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305358_2",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 180,
+   "coverage": 0.4,
+   "traces": 1
+  },
+  {
+   "id": "R504305358_3",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 186,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305358_4",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 198,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305358_5",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 28,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305358_6",
+   "type": "run",
+   "name": "かぐらメインゲレンデ",
+   "inferred": false,
+   "length": 127,
+   "coverage": 0.25,
+   "traces": 1
+  },
+  {
+   "id": "R504305359",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 75,
+   "coverage": 0.8,
+   "traces": 1
+  },
+  {
+   "id": "R504305359_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 66,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305359_3",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 167,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305359_4",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 75,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305359_5",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 26,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R504305360",
+   "type": "run",
+   "name": "パノラマコース",
+   "inferred": false,
+   "length": 508,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305361",
+   "type": "run",
+   "name": "田代連絡コース",
+   "inferred": false,
+   "length": 13,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305361_2",
+   "type": "run",
+   "name": "田代連絡コース",
+   "inferred": false,
+   "length": 310,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305361_3",
+   "type": "run",
+   "name": "田代連絡コース",
+   "inferred": false,
+   "length": 408,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305362",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 102,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305362_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 175,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305362_3",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 119,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305362_4",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 56,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305363",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 38,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305363_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 81,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305364",
+   "type": "run",
+   "name": "チャレンジバーン",
+   "inferred": false,
+   "length": 497,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305365",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 259,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305367",
+   "type": "run",
+   "name": "親切コース",
+   "inferred": false,
+   "length": 408,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305368",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 357,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305368_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 350,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305369",
+   "type": "run",
+   "name": "かもしかコース",
+   "inferred": false,
+   "length": 123,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305369_2",
+   "type": "run",
+   "name": "かもしかコース",
+   "inferred": false,
+   "length": 493,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305369_3",
+   "type": "run",
+   "name": "かもしかコース",
+   "inferred": false,
+   "length": 34,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305370",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 308,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305370_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 335,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305371",
+   "type": "run",
+   "name": "田代湖コース",
+   "inferred": false,
+   "length": 693,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305371_2",
+   "type": "run",
+   "name": "田代湖コース",
+   "inferred": false,
+   "length": 132,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305371_3",
+   "type": "run",
+   "name": "田代湖コース",
+   "inferred": false,
+   "length": 42,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305372",
+   "type": "run",
+   "name": "第1高速連絡コース",
+   "inferred": false,
+   "length": 176,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305372_2",
+   "type": "run",
+   "name": "第1高速連絡コース",
+   "inferred": false,
+   "length": 656,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305372_3",
+   "type": "run",
+   "name": "第1高速連絡コース",
+   "inferred": false,
+   "length": 531,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 272,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373_2",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 163,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373_3",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 666,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373_4",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 72,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373_5",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 272,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305373_6",
+   "type": "run",
+   "name": "田代アリエスカコース",
+   "inferred": false,
+   "length": 80,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305374",
+   "type": "run",
+   "name": "しらかばコース",
+   "inferred": false,
+   "length": 17,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305374_2",
+   "type": "run",
+   "name": "しらかばコース",
+   "inferred": false,
+   "length": 208,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305374_3",
+   "type": "run",
+   "name": "しらかばコース",
+   "inferred": false,
+   "length": 476,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305375",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 265,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305376",
+   "type": "run",
+   "name": "スカイラインコース",
+   "inferred": false,
+   "length": 527,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305376_2",
+   "type": "run",
+   "name": "スカイラインコース",
+   "inferred": false,
+   "length": 256,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305376_3",
+   "type": "run",
+   "name": "スカイラインコース",
+   "inferred": false,
+   "length": 169,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305376_4",
+   "type": "run",
+   "name": "スカイラインコース",
+   "inferred": false,
+   "length": 276,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305377",
+   "type": "run",
+   "name": "田代レディースコース",
+   "inferred": false,
+   "length": 531,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305377_2",
+   "type": "run",
+   "name": "田代レディースコース",
+   "inferred": false,
+   "length": 30,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305377_3",
+   "type": "run",
+   "name": "田代レディースコース",
+   "inferred": false,
+   "length": 558,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305378",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 286,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305379",
+   "type": "run",
+   "name": "ゴンドライーストコース",
+   "inferred": false,
+   "length": 1024,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305381",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 398,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305382",
+   "type": "run",
+   "name": "田代第1ゲレンデ",
+   "inferred": false,
+   "length": 10,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305382_2",
+   "type": "run",
+   "name": "田代第1ゲレンデ",
+   "inferred": false,
+   "length": 354,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305384",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 314,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305384_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 35,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893719",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 253,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893740",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 100,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893744",
+   "type": "run",
+   "name": "かぐら連絡コース",
+   "inferred": false,
+   "length": 786,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893744_2",
+   "type": "run",
+   "name": "かぐら連絡コース",
+   "inferred": false,
+   "length": 101,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893748",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 144,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893748_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 64,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893748_3",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 602,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893755",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 157,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893759",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 196,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893759_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 166,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893763",
+   "type": "run",
+   "name": "ゴンドラライン",
+   "inferred": false,
+   "length": 450,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893763_2",
+   "type": "run",
+   "name": "ゴンドラライン",
+   "inferred": false,
+   "length": 211,
+   "coverage": 0.25,
+   "traces": 1
+  },
+  {
+   "id": "R613893763_3",
+   "type": "run",
+   "name": "ゴンドラライン",
+   "inferred": false,
+   "length": 48,
+   "coverage": 0.75,
+   "traces": 1
+  },
+  {
+   "id": "R613893768",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 278,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R613893771",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 87,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R614568975",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 485,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1026047671",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 3,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "R1026047671_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 1975,
+   "coverage": 0.03,
+   "traces": 1
+  },
+  {
+   "id": "R1026047672",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 943,
+   "coverage": 0.02,
+   "traces": 1
+  },
+  {
+   "id": "R1088882875",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 398,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1088882876",
+   "type": "run",
+   "name": "ジャイアントコース",
+   "inferred": false,
+   "length": 468,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1088882877",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 36,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1089458680",
+   "type": "run",
+   "name": "ダイナミックコース",
+   "inferred": false,
+   "length": 89,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1089458680_2",
+   "type": "run",
+   "name": "ダイナミックコース",
+   "inferred": false,
+   "length": 304,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1531102259",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 84,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1531102259_2",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 194,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R1531102259_3",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 51,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L92592820",
+   "type": "lift",
+   "name": "みつまた第3ロマンスリフト",
+   "inferred": false,
+   "length": 328,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L92592823",
+   "type": "lift",
+   "name": "みつまた第2ロマンスリフト",
+   "inferred": false,
+   "length": 420,
+   "coverage": 0.05,
+   "traces": 1
+  },
+  {
+   "id": "L92592826",
+   "type": "lift",
+   "name": "かぐらゴンドラ",
+   "inferred": false,
+   "length": 3076,
+   "coverage": 0.13,
+   "traces": 1
+  },
+  {
+   "id": "L92592834",
+   "type": "lift",
+   "name": "かぐら第1高速リフト",
+   "inferred": false,
+   "length": 1130,
+   "coverage": 0.64,
+   "traces": 1
+  },
+  {
+   "id": "L92592847",
+   "type": "lift",
+   "name": "みつまたロープウェイ",
+   "inferred": false,
+   "length": 782,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L92592851",
+   "type": "lift",
+   "name": "みつまた第2高速リフト",
+   "inferred": false,
+   "length": 767,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L92592855",
+   "type": "lift",
+   "name": "みつまた第1高速リフト",
+   "inferred": false,
+   "length": 1030,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L203603477",
+   "type": "lift",
+   "name": "田代第1高速リフト",
+   "inferred": false,
+   "length": 1361,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L203603479",
+   "type": "lift",
+   "name": "田代第4ロマンスリフト",
+   "inferred": false,
+   "length": 872,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L203603480",
+   "type": "lift",
+   "name": "田代第2高速リフト",
+   "inferred": false,
+   "length": 888,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L203603481",
+   "type": "lift",
+   "name": "田代第6ロマンスリフト",
+   "inferred": false,
+   "length": 601,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L337518373",
+   "type": "lift",
+   "name": "かぐら第5ロマンスリフト",
+   "inferred": false,
+   "length": 632,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "L337580964",
+   "type": "lift",
+   "name": "かぐら第4ロマンスリフト",
+   "inferred": false,
+   "length": 639,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L337583473",
+   "type": "lift",
+   "name": "田代第8ロマンスリフト",
+   "inferred": false,
+   "length": 300,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L390007386",
+   "type": "lift",
+   "name": "田代ロープウェー",
+   "inferred": false,
+   "length": 2071,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L504305350",
+   "type": "lift",
+   "name": "かぐら第1ロマンス",
+   "inferred": false,
+   "length": 493,
+   "coverage": 0.08,
+   "traces": 1
+  },
+  {
+   "id": "L504305380",
+   "type": "lift",
+   "name": "田代第2ロマンスリフト",
+   "inferred": false,
+   "length": 1040,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "L504305383",
+   "type": "lift",
+   "name": "田代第1ロマンスリフト",
+   "inferred": false,
+   "length": 333,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C126",
+   "type": "connector",
+   "name": "みつまた第2ロマンスリフト 乘车处步道",
+   "inferred": true,
+   "length": 59,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "C127",
+   "type": "connector",
+   "name": "田代第6ロマンスリフト 下车处步道",
+   "inferred": true,
+   "length": 11,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C128",
+   "type": "connector",
+   "name": "かぐら第5ロマンスリフト 下车处步道",
+   "inferred": true,
+   "length": 15,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "C129",
+   "type": "connector",
+   "name": "田代ロープウェー 下车处步道",
+   "inferred": true,
+   "length": 40,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C130",
+   "type": "connector",
+   "name": "かぐら第1ロマンス 下车处步道",
+   "inferred": true,
+   "length": 41,
+   "coverage": 0.25,
+   "traces": 1
+  },
+  {
+   "id": "C131",
+   "type": "connector",
+   "name": "みつまたロープウェイ 下车处步道",
+   "inferred": true,
+   "length": 64,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "R504305359_201",
+   "type": "run",
+   "name": null,
+   "inferred": false,
+   "length": 68,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "C133",
+   "type": "connector",
+   "name": "かぐら第1ロマンス 乘车处步道",
+   "inferred": true,
+   "length": 15,
+   "coverage": 1,
+   "traces": 1
+  },
+  {
+   "id": "C134",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 75,
+   "coverage": 0.8,
+   "traces": 1
+  },
+  {
+   "id": "C135",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 13,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C136",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 38,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C137",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 17,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C138",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 33,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C139",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 49,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C140",
+   "type": "connector",
+   "name": "推算步行连接",
+   "inferred": true,
+   "length": 10,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C141",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 322,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C142",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 294,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C143",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 102,
+   "coverage": 0.71,
+   "traces": 1
+  },
+  {
+   "id": "C144",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 64,
+   "coverage": 0.6,
+   "traces": 1
+  },
+  {
+   "id": "C145",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 106,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C146",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 60,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C147",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 106,
+   "coverage": 0,
+   "traces": 0
+  },
+  {
+   "id": "C148",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 64,
+   "coverage": 0.6,
+   "traces": 1
+  },
+  {
+   "id": "C149",
+   "type": "connector",
+   "name": "推算广场步道",
+   "inferred": true,
+   "length": 101,
+   "coverage": 0.71,
+   "traces": 1
+  },
+  {
+   "id": "C150",
+   "type": "connector",
+   "name": "换乘步道（かぐらゴンドラ → かぐら第1ロマンス）",
+   "inferred": true,
+   "length": 139,
+   "coverage": 0.88,
+   "traces": 1
+  },
+  {
+   "id": "C151",
+   "type": "connector",
+   "name": "换乘步道（みつまたロープウェイ → みつまた第1高速リフト）",
+   "inferred": true,
+   "length": 232,
+   "coverage": 0,
+   "traces": 0
+  }
+ ],
+ "offMap": [
+  {
+   "points": 29,
+   "length": 1088,
+   "from": [
+    36.83724,
+    138.77937
+   ],
+   "to": [
+    36.84648,
+    138.77696
+   ],
+   "meanDistToMap": null,
+   "drop_m": 32,
+   "grade": 0.029,
+   "likelySkiing": false
+  },
+  {
+   "points": 10,
+   "length": 1137,
+   "from": [
+    36.83702,
+    138.7794
+   ],
+   "to": [
+    36.84673,
+    138.77688
+   ],
+   "meanDistToMap": null,
+   "drop_m": 21,
+   "grade": 0.018,
+   "likelySkiing": false
+  },
+  {
+   "points": 108,
+   "length": 2377,
+   "from": [
+    36.86288,
+    138.7736
+   ],
+   "to": [
+    36.87582,
+    138.77727
+   ],
+   "meanDistToMap": null,
+   "drop_m": 109,
+   "grade": 0.046,
+   "likelySkiing": false
+  },
+  {
+   "points": 29,
+   "length": 2172,
+   "from": [
+    36.86256,
+    138.77356
+   ],
+   "to": [
+    36.874,
+    138.77687
+   ],
+   "meanDistToMap": null,
+   "drop_m": 106,
+   "grade": 0.049,
+   "likelySkiing": false
+  },
+  {
+   "points": 31,
+   "length": 2214,
+   "from": [
+    36.87639,
+    138.7777
+   ],
+   "to": [
+    36.89584,
+    138.77632
+   ],
+   "meanDistToMap": null,
+   "drop_m": 60,
+   "grade": 0.027,
+   "likelySkiing": false
+  },
+  {
+   "points": 20,
+   "length": 2176,
+   "from": [
+    36.87674,
+    138.77761
+   ],
+   "to": [
+    36.89553,
+    138.7763
+   ],
+   "meanDistToMap": null,
+   "drop_m": 37,
+   "grade": 0.017,
+   "likelySkiing": false
+  }
+ ]
+}

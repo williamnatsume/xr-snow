@@ -1,0 +1,329 @@
+<title>雪人地图核对</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 布局：整屏航空照片地图 + 右侧（手机为底部）核对面板 */
+:root {
+  --bg: #f3f5f4;
+  --panel: #ffffff;
+  --fg: #16201c;
+  --muted: #5d6b65;
+  --line: #d9e0dc;
+  --accent: #0f7f86;
+  --accent-ink: #ffffff;
+  --chip: #eef3f1;
+  --ok: #1f9d55;
+  --warn: #d97706;
+  --bad: #d23b30;
+  --info: #2563eb;
+  --name: #7c3aed;
+  --font: "Noto Sans SC", "Noto Sans JP", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1513; --panel: #17201d; --fg: #e6eeea; --muted: #94a39c; --line: #2a3632;
+  --accent: #3fb7bd; --accent-ink: #062224; --chip: #1f2a26; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1513; --panel: #17201d; --fg: #e6eeea; --muted: #94a39c; --line: #2a3632;
+  --accent: #3fb7bd; --accent-ink: #062224; --chip: #1f2a26; color-scheme: dark }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); }
+.app { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 360px; grid-template-rows: auto 1fr; }
+header {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  padding-block: calc(10px + env(safe-area-inset-top, 0px)) 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: .02em; }
+.tabs { display: flex; gap: 6px; }
+.tabs button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; }
+.tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.stats { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 0; }
+#map { grid-column: 1; grid-row: 2; background: #c9cfcb; min-height: 0; }
+aside {
+  grid-column: 2; grid-row: 2; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line);
+  padding-block: 14px calc(14px + env(safe-area-inset-bottom, 0px)); padding-left: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+}
+section h2 { margin: 0 0 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.legend { display: grid; grid-template-columns: 34px 1fr; gap: 6px 10px; align-items: center; font-size: 13px; }
+.sw { height: 0; border-top-width: 4px; border-top-style: solid; }
+.dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ffd400; background: rgba(0,0,0,.35); justify-self: center; }
+.sel { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.sel .title { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+.sel .meta { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.marks-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.marks-btns button, .btn {
+  font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--chip); color: var(--fg); cursor: pointer;
+}
+.marks-btns button[data-s="ok"] { border-color: var(--ok); }
+.marks-btns button[data-s="shift"] { border-color: var(--warn); }
+.marks-btns button[data-s="blocked"] { border-color: var(--bad); }
+.marks-btns button[data-s="name"] { border-color: var(--name); }
+.marks-btns button[data-s="missing"] { border-color: var(--info); }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+textarea { font: inherit; font-size: 13px; width: 100%; box-sizing: border-box; min-height: 54px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); resize: vertical; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.active { outline: 2px solid var(--info); }
+ul.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+ul.list li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; font-size: 13px; padding: 8px; border-radius: 8px; background: var(--chip); }
+ul.list li .what { min-width: 0; overflow-wrap: anywhere; }
+ul.list li .note { color: var(--muted); font-size: 12px; }
+.pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; color: #fff; white-space: nowrap; }
+.pill.ok { background: var(--ok); } .pill.shift { background: var(--warn); } .pill.blocked { background: var(--bad); }
+.pill.name { background: var(--name); } .pill.missing { background: var(--info); }
+.linkish { font: inherit; font-size: 12px; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; }
+.status { font-size: 12px; color: var(--muted); }
+footer.src { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.leaflet-container { font: 12px/1.4 var(--font); }
+.leaflet-tooltip.tt { font-size: 12px; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr 42vh; }
+  #map { grid-row: 2; }
+  aside { grid-column: 1; grid-row: 3; border-left: 0; border-top: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+  .stats { flex-basis: 100%; }
+}
+</style>
+<style>/*LEAFLET_CSS*/</style>
+
+<div class="app">
+  <header>
+    <h1>雪人地图核对</h1>
+    <div class="tabs" role="group" aria-label="雪场">
+      <button id="tab-kagura" data-r="kagura" aria-pressed="true">神乐</button>
+      <button id="tab-naeba" data-r="naeba" aria-pressed="false">苗场</button>
+    </div>
+    <div class="stats" id="stats">正在载入地图数据…</div>
+  </header>
+  <div id="map" role="application" aria-label="航空照片和雪道地图"></div>
+  <aside>
+    <section>
+      <h2>怎么核对</h2>
+      <p class="hint" style="margin:0">对照航空照片（夏天的雪道是一条条清理过的长条），点地图上的雪道、连接或黄色圆圈（岔口），在下面标记对不对。地图上缺的路，用“在地图上标一个点”补。</p>
+    </section>
+    <section class="sel" id="sel" aria-live="polite">
+      <div class="title" id="selTitle">还没有选中</div>
+      <div class="meta" id="selMeta">点地图上的线或岔口。推算出来的连接（橙色虚线）最需要看。</div>
+      <div class="marks-btns" id="markBtns">
+        <button data-s="ok" id="m-ok">对的</button>
+        <button data-s="shift" id="m-shift">画歪了</button>
+        <button data-s="blocked" id="m-blocked">走不通</button>
+        <button data-s="name" id="m-name">名字不对</button>
+      </div>
+      <label class="hint" for="note">补充说明（可以不填）</label>
+      <textarea id="note" placeholder="例如：现场是往右下方的林道；这里其实是缆车站后面的步道"></textarea>
+      <div class="status" id="saveStatus"></div>
+    </section>
+    <section>
+      <button class="btn" id="addPoint">在地图上标一个点（缺的路 / 岔口）</button>
+    </section>
+    <section>
+      <h2>图例</h2>
+      <div class="legend">
+        <span class="sw" style="border-top-color:#22a447"></span><span>初级雪道</span>
+        <span class="sw" style="border-top-color:#e2453a"></span><span>中级雪道</span>
+        <span class="sw" style="border-top-color:#111"></span><span>高级 / 专家雪道</span>
+        <span class="sw" style="border-top:4px dashed #f5f5f5;outline:1px solid #555"></span><span>缆车</span>
+        <span class="sw" style="border-top:4px dotted #ff9a1f"></span><span>推算的连接（没人验证）</span>
+        <span class="sw" style="border-top:4px dotted #19b5ab"></span><span>推算的连接（有公开轨迹佐证）</span>
+        <span class="dot"></span><span>岔口</span>
+      </div>
+    </section>
+    <section>
+      <h2>已经标记的</h2>
+      <ul class="list" id="marks"></ul>
+      <p class="hint" id="marksEmpty">还没有标记。标记会保存下来，雪人的开发者用它来修正地图。</p>
+    </section>
+    <footer class="src">航空照片：出典 国土地理院 シームレス空中写真（拼接加工）。雪道和缆车：© OpenStreetMap contributors（ODbL）。推算连接和岔口由雪人的导入程序生成，未经核实。</footer>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DIFF_COLOR = { 1: '#22a447', 2: '#e2453a', 3: '#111111', 4: '#111111' };
+const STATUS = { ok: '对的', shift: '画歪了', blocked: '走不通', name: '名字不对', missing: '缺的路 / 岔口' };
+const STATUS_COLOR = { ok: '#1f9d55', shift: '#d97706', blocked: '#d23b30', name: '#7c3aed', missing: '#2563eb' };
+
+const map = L.map('map', { zoomControl: true, preferCanvas: true, attributionControl: false, maxZoom: 19, minZoom: 12 });
+let resortId = 'kagura', data = null, selected = null, layers = L.layerGroup().addTo(map), photo = L.layerGroup().addTo(map);
+let markLayer = L.layerGroup().addTo(map), allMarks = [], addingPoint = false, db = null, me = null;
+const cache = {};
+
+const $ = (id) => document.getElementById(id);
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+async function loadResort(id) {
+  resortId = id;
+  for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', b.dataset.r === id ? 'true' : 'false');
+  try { localStorage.setItem('xr-review-resort', id); } catch {}
+  if (!cache[id]) {
+    const [d, imgs] = await Promise.all([fetch(`data/${id}.json`).then((r) => r.json()), fetch(`img/${id}-images.json`).then((r) => r.json())]);
+    cache[id] = { d, imgs };
+  }
+  data = cache[id].d;
+  photo.clearLayers(); layers.clearLayers();
+  for (const im of cache[id].imgs) L.imageOverlay(`img/${im.file}`, im.bounds, { interactive: false }).addTo(photo);
+  drawEdges(); drawForks();
+  map.fitBounds(data.bounds);
+  const q = data.quality || {}, t = data.traceEvidence || {};
+  $('stats').textContent = `雪道 ${q.runs ?? '–'} 段 · 缆车 ${q.lifts ?? '–'} 条 · 推算连接 ${data.edges.filter((e) => e.inf).length} 处（${data.edges.filter((e) => e.u).length} 处没人验证）· 岔口 ${data.forks.length} 个` + (t.tracePoints ? ` · 公开轨迹 ${t.tracePoints} 点` : '');
+  clearSelection();
+  renderMarks();
+}
+
+function edgeStyle(e, hi) {
+  if (e.t === 'lift') return { color: hi ? '#00e5ff' : '#f5f5f5', weight: hi ? 5 : 3, dashArray: '8 6', opacity: 0.95 };
+  if (e.inf) return { color: hi ? '#00e5ff' : (e.u ? '#ff9a1f' : '#19b5ab'), weight: hi ? 6 : 4, dashArray: '2 7', opacity: 1, lineCap: 'round' };
+  return { color: hi ? '#00e5ff' : (DIFF_COLOR[e.d] || '#8a8a8a'), weight: hi ? 6 : 4, opacity: 0.92 };
+}
+
+function drawEdges() {
+  for (const e of data.edges) {
+    if (e.t === 'run' && (e.d === 3 || e.d === 4)) L.polyline(e.g, { color: '#ffffff', weight: 7, opacity: 0.55, interactive: false }).addTo(layers);
+    const line = L.polyline(e.g, edgeStyle(e, false)).addTo(layers);
+    line.bindTooltip(e.n || (e.t === 'connector' ? '推算的连接' : '无名雪道'), { sticky: true, className: 'tt' });
+    line.on('click', (ev) => { L.DomEvent.stopPropagation(ev); select({ kind: 'edge', obj: e, layer: line, latlng: ev.latlng }); });
+    e._layer = line;
+  }
+}
+
+function drawForks() {
+  for (const f of data.forks) {
+    const c = L.circleMarker([f.lat, f.lon], { radius: 7, color: '#ffd400', weight: 3, fillColor: '#000', fillOpacity: 0.35 }).addTo(layers);
+    c.bindTooltip('岔口：' + f.outs.join(' / '), { className: 'tt' });
+    c.on('click', (ev) => { L.DomEvent.stopPropagation(ev); select({ kind: 'fork', obj: f, layer: c, latlng: ev.latlng }); });
+  }
+}
+
+function clearSelection() {
+  if (selected?.kind === 'edge') selected.layer.setStyle(edgeStyle(selected.obj, false));
+  if (selected?.kind === 'fork') selected.layer.setStyle({ color: '#ffd400' });
+  selected = null;
+  $('selTitle').textContent = '还没有选中';
+  $('selMeta').textContent = '点地图上的线或岔口。推算出来的连接（橙色虚线）最需要看。';
+  setButtons();
+}
+
+function select(s) {
+  clearSelection();
+  selected = s;
+  if (s.kind === 'edge') {
+    const e = s.obj;
+    s.layer.setStyle(edgeStyle(e, true)); s.layer.bringToFront();
+    const kind = e.t === 'lift' ? '缆车' : e.inf ? '推算的连接' : '雪道';
+    $('selTitle').textContent = `${kind}：${e.n || '（没有名字）'}`;
+    const diff = e.t === 'run' ? `难度 ${['', '初级', '中级', '高级', '专家'][e.d] || '未知'} · ` : '';
+    const ev = e.ev != null ? `公开轨迹覆盖 ${e.ev}%` : '没有公开轨迹经过';
+    $('selMeta').textContent = `${diff}${ev}${e.note ? ' · ' + e.note : ''}（编号 ${e.id}）`;
+  } else if (s.kind === 'fork') {
+    const f = s.obj;
+    s.layer.setStyle({ color: '#00e5ff' });
+    $('selTitle').textContent = '岔口';
+    $('selMeta').textContent = `往下可以走：${f.outs.join(' / ')}${f.ele != null ? ` · 海拔 ${f.ele} m` : ''}（编号 ${f.id}）`;
+  } else if (s.kind === 'point') {
+    $('selTitle').textContent = '新标的点';
+    $('selMeta').textContent = `位置 ${s.latlng.lat.toFixed(5)}, ${s.latlng.lng.toFixed(5)}。写一下这里缺了什么，再点“保存这个点”。`;
+  }
+  setButtons();
+}
+
+function setButtons() {
+  const canWrite = !!db;
+  const isPoint = selected?.kind === 'point';
+  for (const b of document.querySelectorAll('#markBtns button')) b.disabled = !canWrite || !selected || isPoint;
+  let save = $('savePoint');
+  if (isPoint && !save) {
+    save = document.createElement('button');
+    save.id = 'savePoint'; save.className = 'btn primary'; save.textContent = '保存这个点';
+    save.addEventListener('click', () => saveMark('missing'));
+    $('markBtns').appendChild(save);
+  } else if (!isPoint && save) save.remove();
+  if (save) save.disabled = !canWrite;
+  if (!canWrite) $('saveStatus').textContent = db === null && window.__dbChecked ? '这个页面的保存功能暂时不可用（需要登录 claude.ai）。可以先看，不能保存。' : '';
+}
+
+async function saveMark(status) {
+  if (!db || !selected) return;
+  const s = selected;
+  const note = $('note').value.trim();
+  const ll = s.kind === 'point' ? s.latlng : (s.kind === 'fork' ? L.latLng(s.obj.lat, s.obj.lon) : s.latlng);
+  const doc = {
+    resort: resortId, kind: s.kind, status,
+    target: s.kind === 'point' ? null : s.obj.id,
+    targetName: s.kind === 'edge' ? (s.obj.n || null) : s.kind === 'fork' ? s.obj.outs.join(' / ') : null,
+    note, lat: +ll.lat.toFixed(6), lon: +ll.lng.toFixed(6), at: new Date().toISOString(), by: me || null
+  };
+  $('saveStatus').textContent = '正在保存…';
+  try {
+    await db.collection('marks').add(doc);
+    $('saveStatus').textContent = `已保存：${STATUS[status]}`;
+    $('note').value = '';
+    if (s.kind === 'point') { clearSelection(); }
+  } catch (e) {
+    $('saveStatus').textContent = '没保存上：' + (e?.message || e?.code || '未知错误') + '。可以稍后再点一次。';
+  }
+}
+
+function renderMarks() {
+  markLayer.clearLayers();
+  const list = allMarks.filter((m) => m.resort === resortId).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+  $('marksEmpty').hidden = list.length > 0;
+  const ul = $('marks'); ul.textContent = '';
+  for (const m of list) {
+    const pin = L.circleMarker([m.lat, m.lon], { radius: 6, color: '#fff', weight: 2, fillColor: STATUS_COLOR[m.status] || '#888', fillOpacity: 1 }).addTo(markLayer);
+    pin.bindTooltip(`${STATUS[m.status] || m.status}${m.note ? '：' + m.note : ''}`, { className: 'tt' });
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="pill ${esc(m.status)}">${esc(STATUS[m.status] || m.status)}</span>
+      <span class="what">${esc(m.targetName || (m.kind === 'point' ? '地图上的点' : m.target))}${m.note ? `<div class="note">${esc(m.note)}</div>` : ''}</span>
+      <button class="linkish" title="在地图上找到">定位</button>`;
+    li.querySelector('button').addEventListener('click', () => map.setView([m.lat, m.lon], 18));
+    ul.appendChild(li);
+  }
+}
+
+$('markBtns').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-s]');
+  if (b && !b.disabled) saveMark(b.dataset.s);
+});
+$('addPoint').addEventListener('click', () => {
+  addingPoint = !addingPoint;
+  $('addPoint').classList.toggle('active', addingPoint);
+  $('addPoint').textContent = addingPoint ? '点地图上要标的位置…（再点一次取消）' : '在地图上标一个点（缺的路 / 岔口）';
+});
+map.on('click', (ev) => {
+  if (!addingPoint) { clearSelection(); return; }
+  addingPoint = false;
+  $('addPoint').classList.remove('active');
+  $('addPoint').textContent = '在地图上标一个点（缺的路 / 岔口）';
+  select({ kind: 'point', latlng: ev.latlng });
+  const tmp = L.circleMarker(ev.latlng, { radius: 7, color: '#fff', weight: 2, fillColor: STATUS_COLOR.missing, fillOpacity: 1 }).addTo(markLayer);
+  setTimeout(() => tmp.remove(), 8000);
+});
+for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => loadResort(b.dataset.r));
+
+let start = 'kagura';
+try { const s = localStorage.getItem('xr-review-resort'); if (s === 'naeba' || s === 'kagura') start = s; } catch {}
+loadResort(start).catch((e) => { $('stats').textContent = '地图数据载入失败：' + e.message; });
+
+// 保存功能：共享存储（标记给开发者读取，用来修正地图）
+(async () => {
+  try {
+    const [d, u] = await Promise.all([window.claude?.use('db'), window.claude?.use('user')]);
+    window.__dbChecked = true;
+    db = d || null;
+    if (u) { try { me = await u.id(); } catch {} }
+    setButtons();
+    if (!db) return;
+    let gotData = false;
+    const timer = setTimeout(() => { if (!gotData) $('saveStatus').textContent = '已标记的内容还没载入，网络可能较慢。'; }, 10000);
+    db.collection('marks').onSnapshot((snap) => {
+      gotData = true; clearTimeout(timer);
+      allMarks = snap.docs.map((x) => ({ id: x.id, ...x.data() }));
+      renderMarks();
+    }, (e) => { clearTimeout(timer); $('saveStatus').textContent = '读取已标记内容失败：' + (e?.message || e?.code || ''); });
+  } catch { window.__dbChecked = true; setButtons(); }
+})();
+</script>
