@@ -328,7 +328,8 @@ cd xr-snow && npm test
 - 用户已在 Xcode → Settings → Accounts 登录 Apple ID（免费个人团队）。团队 ID 用 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` 查，**不要提交**。
 - 终端账号和 Claude Code 是同一个用户，仓库在 **`~/dev/xr-snow`**，当前在分支 `claude/claude-code-iphone-mxs9dl`。
 - 没装 Homebrew。Node 26 LTS 解压在 `$HOME/.local/node`，GitHub CLI `gh` 在 `$HOME/.local/bin`，都核对过 SHA-256；PATH 写在 `~/.zprofile`。
-- 已验证：`npm ci && npm test` 66 项全过；`npm run build:ios` 无改动（12 条播报）；不签名真机编译 `BUILD SUCCEEDED`。
+- 已验证：`npm ci && npm test` 66 项全过；`npm run build:ios` 无改动（12 条播报）；不签名真机编译 `BUILD SUCCEEDED`；iPhone 18 Pro Max 模拟器（iOS 27.2）上 M1 自检通过（12 条播报一致，已到达）。
+- GitHub：用户已用 `gh auth login --web` 登录并 `gh auth setup-git`，可以直接 `git push`。本仓库的 git 作者邮箱用 GitHub 的 noreply 地址（只设在仓库里）。
 - 注意：新 Mac 上 `python3`、`git` 在装 Xcode 前只是占位程序，一运行就会弹出“安装命令行工具”窗口。装了 Xcode 之后就没这个问题了。
 - 网络：平时备用 iPhone 热点（每月约 30GB），**大下载尽量用 Wi-Fi**。
 
@@ -337,8 +338,6 @@ cd xr-snow && npm test
 **下一步（带数据线时）**
 1. 按 5.4 连接 iPhone（iPhone 是 iOS 27，需要 Xcode 27 以上）。之前用免费个人团队装的 App 已过 7 天有效期。**直接覆盖安装，不要先删除旧 App**，这样钥匙串里的 Claude / OpenAI 密钥更有可能保留下来。
 2. 按第 4 节“装到 iPhone”装上雪人 App，跑 `-selfcheck`，再试一次模拟导航听中文播报。签名团队 ID 不要提交进 project.pbxproj。
-3. 第一次 `git push` 前，用户要运行 `gh auth login --web` 和 `gh auth setup-git`，在浏览器里登录 GitHub。
-
 **之后的方向（用户已决定，2026-11 讨论）**
 - 目标：滑雪途中几乎不用掏手机。这个雪季先走“纯软件 + 现成设备”（耳机 / 头盔音频 / Apple Watch），自制硬件只做借给测试者的实验样机，滑雪镜 HUD 暂缓（成本太高）。
 - 产品核心：**不同水平的人，能顺利到同一个地方集合**（每人按自己的难度规划路线和到达时间，领队看到谁确认了、谁到了、谁的位置过期、谁可能走错）。
