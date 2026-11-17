@@ -322,13 +322,13 @@ cd xr-snow && npm test
 
 **现状（2026-11-17）**
 - 新机刚开箱。用户在咖啡馆，Wi-Fi 很慢；平时备用的是 iPhone 热点（流量有限，约 30GB），**大下载尽量用 Wi-Fi**。
-- 用户正在 App Store 下载 Xcode，可能今天下不完。
+- **还什么都没装**：Xcode 还没开始下载，Claude Code 是刚装上的（用来开这个本地会话）。
 - **今天没带数据线**，雪人 App 明天再装到 iPhone。之前用免费个人团队装的 App 已过 7 天有效期，打不开了，需要重装。
 - 还没 clone 仓库。第一次用 git 会触发安装命令行工具（约 1GB），会和 Xcode 抢带宽，所以等 Xcode 装好（自带 git）再 clone。
 - **最新代码在分支 `claude/claude-code-iphone-mxs9dl`**（小队集合 `nav/gather.js`、竖屏提示等），还没合进 `main`。clone 后先 checkout 这个分支，或者问用户要不要合并到 `main`。
 
 **今天（慢网，小流量的事）**
-1. 确认 Xcode 下载在进行；不要同时开其他大下载。
+1. 先让用户在 App Store 开始下载 Xcode（最大最慢，网慢就让它在后台慢慢下，中断会续传，今天下不完明天继续）；下载期间不要同时开其他大下载。
 2. 帮用户检查：系统自动更新关闭、iCloud 照片暂停、插电时防止睡眠。
 3. 环境检查（5.1 的命令）。Node：从 nodejs.org 装 LTS（几十 MB），或照 5.6 解压到 `$HOME/.local/node`。
 
