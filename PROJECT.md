@@ -2,7 +2,7 @@
 
 > 给接手的 Claude Code（包括 Mac 上的新会话）：**先完整读这份文件，再读 `docs/ski-nav.md`**。
 > 这个仓库是公开的（GitHub Pages），不要写入个人信息、账号、令牌或私人联系方式。
-> 最后更新：2026-11-04（Mac 上的 Claude Code 会话：环境装好，开始 M1）
+> 最后更新：2026-11-17（iPhone 上的云端会话：换了新 Mac，见 5.7；小队集合核心见第 4 节末尾）
 
 ## 0. 一句话
 
@@ -316,6 +316,36 @@ cd xr-snow && npm test
 - Homebrew **没有装成**（安装脚本需要 sudo 密码，未完成）。Node 26 LTS 直接从 nodejs.org 解压到 `$HOME/.local/node`（已核对 SHA-256）；用前 `export PATH=$HOME/.local/node/bin:$PATH`。
 - Xcode 是用户在 App Store 里点“获取”装的；iOS 27.2 模拟器用 `xcodebuild -downloadPlatform iOS` 下载（约 8.3 GB）。
 - npm 11 默认不跑安装脚本：esbuild 会提示 postinstall 被跳过，但不影响使用（平台二进制已装上）。
+
+### 5.7 新 MacBook Air（2026-11-17 起，接手请先看这里）
+5.6 那台借来的 Mac 已经不能用了。用户买了自己的 **MacBook Air M5（16GB 内存、512GB 硬盘）**，之后都在这台上开发。
+
+**现状（2026-11-17）**
+- 新机刚开箱。用户在咖啡馆，Wi-Fi 很慢；平时备用的是 iPhone 热点（流量有限，约 30GB），**大下载尽量用 Wi-Fi**。
+- 用户正在 App Store 下载 Xcode，可能今天下不完。
+- **今天没带数据线**，雪人 App 明天再装到 iPhone。之前用免费个人团队装的 App 已过 7 天有效期，打不开了，需要重装。
+- 还没 clone 仓库。第一次用 git 会触发安装命令行工具（约 1GB），会和 Xcode 抢带宽，所以等 Xcode 装好（自带 git）再 clone。
+- **最新代码在分支 `claude/claude-code-iphone-mxs9dl`**（小队集合 `nav/gather.js`、竖屏提示等），还没合进 `main`。clone 后先 checkout 这个分支，或者问用户要不要合并到 `main`。
+
+**今天（慢网，小流量的事）**
+1. 确认 Xcode 下载在进行；不要同时开其他大下载。
+2. 帮用户检查：系统自动更新关闭、iCloud 照片暂停、插电时防止睡眠。
+3. 环境检查（5.1 的命令）。Node：从 nodejs.org 装 LTS（几十 MB），或照 5.6 解压到 `$HOME/.local/node`。
+
+**明天（带线，最好有快一点的 Wi-Fi）**
+1. Xcode 装好后：`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`、`sudo xcodebuild -license accept`、`xcodebuild -runFirstLaunch`（sudo 需要用户输密码）。只装 iOS 平台；iOS 模拟器（约 8GB）等有快 Wi-Fi 再下，真机调试不需要。iPhone 是 iOS 27，需要 Xcode 27 以上。
+2. 用户在 Xcode → Settings → Accounts 登录 Apple ID（免费个人团队）。
+3. `git clone https://github.com/williamnatsume/xr-snow.git`，checkout 上面的分支，`npm ci && npm test`（66 个应全部通过），`npm run build:ios`。第一次 `git push` 时用户要在浏览器登录 GitHub。
+4. 按 5.4 连接 iPhone，按第 4 节“装到 iPhone”把雪人 App 装上，跑 `-selfcheck`，再试一次模拟导航听中文播报。签名团队 ID 不要提交进 project.pbxproj。
+5. 把这台 Mac 的实际情况（macOS / Xcode 版本、用户名、仓库路径、Node 安装方式）写进本节，替换 5.6 的旧信息。
+
+**之后的方向（用户已决定，2026-11 讨论）**
+- 目标：滑雪途中几乎不用掏手机。这个雪季先走“纯软件 + 现成设备”（耳机 / 头盔音频 / Apple Watch），自制硬件只做借给测试者的实验样机，滑雪镜 HUD 暂缓（成本太高）。
+- 产品核心：**不同水平的人，能顺利到同一个地方集合**（每人按自己的难度规划路线和到达时间，领队看到谁确认了、谁到了、谁的位置过期、谁可能走错）。
+- 第一版尽量不靠途中对话：出发前或坐缆车时确认，途中自动播报；按钮加震动补不了完整的语音交互。
+- 验证前提：挑一个雪场，把测试范围内的雪道（难度、方向、岔口、缆车）核实好。
+- 测试最小功能：建队和加入（邀请码）、位置共享（显示几分钟前的位置，断网标“已过期”）、发起集合、每人收到自己的路线并一键开始导航、领队状态、自动记录指标（打开 App 次数、预计和实际到达时间、偏航）。
+- 计划：12 月中旬第一次真实小队测试（3 到 5 人，水平不同）。
 
 ## 6. 硬件备忘
 
