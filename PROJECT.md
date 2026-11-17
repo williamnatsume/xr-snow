@@ -2,7 +2,7 @@
 
 > 给接手的 Claude Code（包括 Mac 上的新会话）：**先完整读这份文件，再读 `docs/ski-nav.md`**。
 > 这个仓库是公开的（GitHub Pages），不要写入个人信息、账号、令牌或私人联系方式。
-> 最后更新：2026-11-17（iPhone 上的云端会话：换了新 Mac，见 5.7；小队集合核心见第 4 节末尾）
+> 最后更新：2026-11-17（新 MacBook Air 上的本地会话：环境已配好，见 5.7；小队集合核心见第 4 节末尾）
 
 ## 0. 一句话
 
@@ -15,7 +15,7 @@
 | 速度 HUD（网页） | ✅ 可用。640×400、黑底透明；模拟 / GPX 回放 / GPS；轨迹记录导出 GPX | `speed-hud.html`，线上 https://williamnatsume.github.io/xr-snow/ |
 | 雪场语音导航 MVP（网页） | ✅ 模拟器可完整跑通；真实 GPS 在 iPhone 前台可用（未上雪实测） | `ski-nav.html`，线上 https://williamnatsume.github.io/xr-snow/ski-nav.html |
 | 雪场数据 | 虚构演示雪场 + 神乐（かぐら，OSM 导入，**未核实**） | `resorts/*.json`，导入脚本 `tools/import-osm.mjs` |
-| 自动测试 | ✅ 30 项全部通过（含 3 项 iOS 打包文件测试） | `npm test` |
+| 自动测试 | ✅ 66 项全部通过（含 iOS 打包文件测试） | `npm test` |
 | 原生 iOS App | ✅ M1 完成：iPhone 18 Pro Max 模拟器（iOS 27.2）上自检通过，12 条播报与 npm test 一致；界面手动跑通一次模拟导航。🟡 M2 进行中：已装到用户的 iPhone 18 Pro Max（iOS 27.0.1），真机自检通过；用户确认模拟导航时能听到中文语音播报（2026-11-04）；真实 GPS 待户外试用 | `ios/XRSnowNav` |
 | 硬件 | 0.23" Micro-OLED 光波导（Sony ECX336CN，640×400）经 HDMI 接电脑可显示；接 iPhone 蓝屏 | 见第 6 节 |
 
@@ -69,7 +69,7 @@ nav.snapshot(nowMs);                  // 界面用：state、nextText、distToNe
 解决网页版最大的问题：**iPhone 锁屏 / 放进口袋后，网页会停止定位和播报**。
 
 ### 设备
-- 开发机：Apple 芯片的 MacBook Pro（2021，借用；用户会用独立的 macOS 用户账号）
+- 开发机：用户自己的 MacBook Air M5（2026-11-17 起，见 5.7）；之前借用的 MacBook Pro（2021）已不再使用
 - 测试机：iPhone 18 Pro Max（最新 iOS）
 - Apple ID：先用免费个人团队（真机安装 7 天过期），需要 TestFlight 时再升级付费开发者账号
 
@@ -285,6 +285,8 @@ which brew node git
 ```
 
 ### 5.2 自动安装 Xcode（尽量自动，需要用户配合的地方先说明再执行）
+> 实际做法：两台 Mac 都**没用 Homebrew / mas**（装 Homebrew 要 sudo 密码）。Node 直接解压，Xcode 由用户在 App Store 点“获取”。以 5.7 为准，下面的步骤 1–4 仅作备选。
+
 1. 安装 Homebrew（如果没有）：运行官方安装脚本；过程中需要用户输入 macOS 密码。
 2. `brew install node mas`（node 用于 `npm test` 和打包；mas 是 Mac App Store 命令行工具）。
 3. 让用户在 App Store 应用里登录自己的 Apple ID（只能由用户操作）。
@@ -310,7 +312,7 @@ cd xr-snow && npm test
 
 ### 5.5 然后开始第 4 节的 M1
 
-### 5.6 这台 Mac 的实际情况（2026-11-04 记录）
+### 5.6 旧的借用 Mac（2026-11-04 记录，已不再使用，仅供参考）
 - 原为 macOS 15.1.1，装不了 Xcode 27（需要 macOS 26.6 以上，iPhone 18 / iOS 27 真机需要 Xcode 27）→ 用户已升级到 **macOS 27.2**；现为 **Xcode 27.2**。
 - 终端账号是 `wly`（`$HOME` = `/Users/wly`），但 Claude Code 的工作文件夹是 `/Users/zhy`：仓库在 **`/Users/zhy/dev/xr-snow`**。命令里不要用 `~` 指代仓库位置。
 - Homebrew **没有装成**（安装脚本需要 sudo 密码，未完成）。Node 26 LTS 直接从 nodejs.org 解压到 `$HOME/.local/node`（已核对 SHA-256）；用前 `export PATH=$HOME/.local/node/bin:$PATH`。
@@ -320,24 +322,22 @@ cd xr-snow && npm test
 ### 5.7 新 MacBook Air（2026-11-17 起，接手请先看这里）
 5.6 那台借来的 Mac 已经不能用了。用户买了自己的 **MacBook Air M5（16GB 内存、512GB 硬盘）**，之后都在这台上开发。
 
-**现状（2026-11-17）**
-- 新机刚开箱。用户在咖啡馆，Wi-Fi 很慢；平时备用的是 iPhone 热点（流量有限，约 30GB），**大下载尽量用 Wi-Fi**。
-- **还什么都没装**：Xcode 还没开始下载，Claude Code 是刚装上的（用来开这个本地会话）。
-- **今天没带数据线**，雪人 App 明天再装到 iPhone。之前用免费个人团队装的 App 已过 7 天有效期，打不开了，需要重装。
-- 还没 clone 仓库。第一次用 git 会触发安装命令行工具（约 1GB），会和 Xcode 抢带宽，所以等 Xcode 装好（自带 git）再 clone。
-- **最新代码在分支 `claude/claude-code-iphone-mxs9dl`**（小队集合 `nav/gather.js`、竖屏提示等），还没合进 `main`。clone 后先 checkout 这个分支，或者问用户要不要合并到 `main`。
+**这台 Mac 的实际情况（2026-11-17 配好）**
+- macOS 27.2（arm64）。系统自动更新已关（27.2.1 还没装），iCloud 照片已暂停。
+- **Xcode 27.2**（27B52），用户在 App Store 点“获取”装的，已 `xcode-select -s` 并接受许可；iOS 平台和模拟器用 `xcodebuild -downloadPlatform iOS` 下载。
+- 用户已在 Xcode → Settings → Accounts 登录 Apple ID（免费个人团队）。团队 ID 用 `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` 查，**不要提交**。
+- 终端账号和 Claude Code 是同一个用户，仓库在 **`~/dev/xr-snow`**，当前在分支 `claude/claude-code-iphone-mxs9dl`。
+- 没装 Homebrew。Node 26 LTS 解压在 `$HOME/.local/node`，GitHub CLI `gh` 在 `$HOME/.local/bin`，都核对过 SHA-256；PATH 写在 `~/.zprofile`。
+- 已验证：`npm ci && npm test` 66 项全过；`npm run build:ios` 无改动（12 条播报）；不签名真机编译 `BUILD SUCCEEDED`。
+- 注意：新 Mac 上 `python3`、`git` 在装 Xcode 前只是占位程序，一运行就会弹出“安装命令行工具”窗口。装了 Xcode 之后就没这个问题了。
+- 网络：平时备用 iPhone 热点（每月约 30GB），**大下载尽量用 Wi-Fi**。
 
-**今天（慢网，小流量的事）**
-1. 先让用户在 App Store 开始下载 Xcode（最大最慢，网慢就让它在后台慢慢下，中断会续传，今天下不完明天继续）；下载期间不要同时开其他大下载。
-2. 帮用户检查：系统自动更新关闭、iCloud 照片暂停、插电时防止睡眠。
-3. 环境检查（5.1 的命令）。Node：从 nodejs.org 装 LTS（几十 MB），或照 5.6 解压到 `$HOME/.local/node`。
+**最新代码在分支 `claude/claude-code-iphone-mxs9dl`**（小队集合 `nav/gather.js`、竖屏提示等），还没合进 `main`。要不要合并先问用户。
 
-**明天（带线，最好有快一点的 Wi-Fi）**
-1. Xcode 装好后：`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`、`sudo xcodebuild -license accept`、`xcodebuild -runFirstLaunch`（sudo 需要用户输密码）。只装 iOS 平台；iOS 模拟器（约 8GB）等有快 Wi-Fi 再下，真机调试不需要。iPhone 是 iOS 27，需要 Xcode 27 以上。
-2. 用户在 Xcode → Settings → Accounts 登录 Apple ID（免费个人团队）。
-3. `git clone https://github.com/williamnatsume/xr-snow.git`，checkout 上面的分支，`npm ci && npm test`（66 个应全部通过），`npm run build:ios`。第一次 `git push` 时用户要在浏览器登录 GitHub。
-4. 按 5.4 连接 iPhone，按第 4 节“装到 iPhone”把雪人 App 装上，跑 `-selfcheck`，再试一次模拟导航听中文播报。签名团队 ID 不要提交进 project.pbxproj。
-5. 把这台 Mac 的实际情况（macOS / Xcode 版本、用户名、仓库路径、Node 安装方式）写进本节，替换 5.6 的旧信息。
+**下一步（带数据线时）**
+1. 按 5.4 连接 iPhone（iPhone 是 iOS 27，需要 Xcode 27 以上）。之前用免费个人团队装的 App 已过 7 天有效期。**直接覆盖安装，不要先删除旧 App**，这样钥匙串里的 Claude / OpenAI 密钥更有可能保留下来。
+2. 按第 4 节“装到 iPhone”装上雪人 App，跑 `-selfcheck`，再试一次模拟导航听中文播报。签名团队 ID 不要提交进 project.pbxproj。
+3. 第一次 `git push` 前，用户要运行 `gh auth login --web` 和 `gh auth setup-git`，在浏览器里登录 GitHub。
 
 **之后的方向（用户已决定，2026-11 讨论）**
 - 目标：滑雪途中几乎不用掏手机。这个雪季先走“纯软件 + 现成设备”（耳机 / 头盔音频 / Apple Watch），自制硬件只做借给测试者的实验样机，滑雪镜 HUD 暂缓（成本太高）。
