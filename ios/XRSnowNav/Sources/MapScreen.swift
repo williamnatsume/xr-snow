@@ -1,4 +1,6 @@
-// App 里的地图：真实雪场叠在卫星图上（Apple 地图），虚构演示雪场画示意图。
+// App 里的地图：有地形数据的真实雪场（目前是内置的神乐）默认显示雪道图风格的 3D 地图（TrailMapView），
+// 右上角可以切回卫星图；没有地形数据的真实雪场叠在卫星图上（Apple 地图）；虚构演示雪场画示意图。
+// 下面说的颜色是卫星图的；雪道图的画法见 TrailMapScene.swift。
 // 雪道按难度着色（绿 初级 / 红 中级 / 黑 高级），缆车白色虚线，推算的连接橙色点线，黄圈是岔口；
 // 当前路线用青色加粗（雪人刚规划、还没出发的是青色虚线），蓝点是自己，闪烁的圈是下一个岔口。
 //
@@ -17,17 +19,37 @@ struct MapScreen: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var follow = false
     @State private var selected: String?
+    @State private var terrain: Terrain?          // 有地形数据才能画雪道图（3D）
+    @State private var trailStyle = true
+
+    init(model: NavModel) {
+        self.model = model
+        _terrain = State(initialValue: Terrain.bundled(model.resortId))
+    }
+
+    private var showTrail: Bool { trailStyle && terrain != nil && model.mapData?.geo == true }
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 if let data = model.mapData {
-                    if data.geo { geoMap(data) } else { SchematicMap(data: data, state: model.mapState) }
+                    if data.geo, trailStyle, let terrain {
+                        TrailMapView(data: data, state: model.mapState, terrain: terrain, follow: follow, selected: $selected)
+                            .ignoresSafeArea(edges: .bottom)
+                    } else if data.geo { geoMap(data) } else { SchematicMap(data: data, state: model.mapState) }
                 } else {
                     ContentUnavailableView("没有地图数据", systemImage: "map")
                 }
                 VStack(spacing: 10) {
-                    HStack { Spacer(); micButton }
+                    HStack(alignment: .bottom) {
+                        if showTrail {
+                            Text("地形：出典 国土地理院 · 雪道：© OpenStreetMap（未核实）")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.thinMaterial, in: Capsule()).padding(.leading, 12)
+                        }
+                        Spacer(); micButton
+                    }
                     bottomCard
                 }
                 .padding(.bottom, 8)
@@ -37,6 +59,14 @@ struct MapScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { model.mapOpen = false; dismiss() } }
+                if terrain != nil && model.mapData?.geo == true {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { trailStyle.toggle(); if follow { centerOnMe() } } label: {
+                            Image(systemName: trailStyle ? "globe.asia.australia.fill" : "mountain.2.fill")
+                        }
+                        .accessibilityLabel(trailStyle ? "切换到卫星图" : "切换到雪道图")
+                    }
+                }
                 if model.mapData?.geo == true && model.mapState?.pos != nil {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { follow.toggle(); if follow { centerOnMe() } } label: {
@@ -180,6 +210,7 @@ struct MapScreen: View {
                 if let d = st?.forkDist { Text("往下约 \(Int((d / 10).rounded()) * 10) 米有个岔口（闪烁的圈）").font(.subheadline).foregroundStyle(.secondary) }
             } else {
                 MapLegend()
+                if showTrail { Text("灰色 = 雪道外，勿入（范围未核实，以现场标识为准）；树只是示意").font(.caption).foregroundStyle(.secondary) }
                 Text("点地点可以让雪人带你去；也可以直接说“去山顶”").font(.caption).foregroundStyle(.secondary)
             }
         }
