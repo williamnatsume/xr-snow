@@ -335,9 +335,19 @@ cd xr-snow && npm test
 
 **最新代码在分支 `claude/claude-code-iphone-mxs9dl`**（小队集合 `nav/gather.js`、竖屏提示等），还没合进 `main`。要不要合并先问用户。
 
-**下一步（带数据线时）**
-1. 按 5.4 连接 iPhone（iPhone 是 iOS 27，需要 Xcode 27 以上）。之前用免费个人团队装的 App 已过 7 天有效期。**直接覆盖安装，不要先删除旧 App**，这样钥匙串里的 Claude / OpenAI 密钥更有可能保留下来。
-2. 按第 4 节“装到 iPhone”装上雪人 App，跑 `-selfcheck`，再试一次模拟导航听中文播报。签名团队 ID 不要提交进 project.pbxproj。
+**真机重装（2026-11-18，咖啡馆）**
+- 用新 Mac 的免费个人团队签名后，覆盖装到 iPhone 18 Pro Max（iOS 27.0.1）。新证书要用户在 iPhone 上重新"信任开发者"（设置 → 通用 → VPN 与设备管理）。
+- 真机 M1 自检通过。**钥匙串里的密钥保留下来了**：实时语音能直接连上 OpenAI，说明覆盖安装没丢密钥。
+- 新增 App 图标：`Resources/Assets.xcassets/AppIcon.appiconset`，主题是戴滑雪镜的雪人，有默认、深色、着色三版，每张 1024×1024。工程里加了 `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`。
+- **发现的问题**：用 `-selfcheck` 启动时，App 照常开麦克风听唤醒词。在咖啡馆里，日志没记到听见"雪人"，实时语音却连上了，然后把旁人说的 "OK" / "Alright" 当成指令回话并出声。
+  - 已改：`-selfcheck` 启动时不开麦克风、不连实时语音（`NavModel.quietLaunch`）。
+  - **待查**：没听到"雪人"为什么会连上实时语音（误唤醒？）。
+- 声音：App 用的是媒体音量（`.playback`），侧边静音开关和铃声音量都管不住。在公共场所测试前，先在 App 里把音量调到 0。另外，`devicectl device process launch` 不带 `-selfcheck` 会以正常模式启动，会开始听。
+
+**下一步**
+1. 在家试：模拟导航听中文播报、实际语音对话。顺便查上面那次误唤醒（日志在 App 的 `Documents/logs`，取回方法见 `FileLog.swift` 开头）。
+2. 签名团队 ID 不要提交进 project.pbxproj。
+
 **之后的方向（用户已决定，2026-11 讨论）**
 - 目标：滑雪途中几乎不用掏手机。这个雪季先走“纯软件 + 现成设备”（耳机 / 头盔音频 / Apple Watch），自制硬件只做借给测试者的实验样机，滑雪镜 HUD 暂缓（成本太高）。
 - 产品核心：**不同水平的人，能顺利到同一个地方集合**（每人按自己的难度规划路线和到达时间，领队看到谁确认了、谁到了、谁的位置过期、谁可能走错）。

@@ -271,8 +271,12 @@ final class NavModel {
     }
 
     // 需要麦克风：开了唤醒词，或者有打开的命令窗口
+    // 用 -selfcheck 启动时不开麦克风、不连实时语音：自检只比对播报文字，
+    // 不然在公共场所会把旁人的说话当成指令并出声（2026-11-18 咖啡馆实测发生过）。
+    private let quietLaunch = ProcessInfo.processInfo.arguments.contains("-selfcheck")
+
     private func updateListening() async {
-        let want = wakeWordOn || Date() < commandWindowUntil || rtActive
+        let want = !quietLaunch && (wakeWordOn || Date() < commandWindowUntil || rtActive)
         if want && !input.running {
             speech.stop()
             await input.start(langs: listenLangs)
